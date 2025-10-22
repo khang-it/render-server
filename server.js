@@ -17,5 +17,12 @@ app.get("/", async (req, res) => {
     res.json({ now: result.rows[0] });
 });
 
+// API test
+app.get("/ok", async (req, res) => {
+    let rs = "Received ok" + new Date();
+    console.log("OK: ", rs);
+    res.json({ rs });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
