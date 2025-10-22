@@ -11,17 +11,55 @@ const pool = new Pool({
 });
 
 // API test
+app.get("/echo", async (req, res) => {
+    try {
+        const { msg } = req.query || { msg: 'Xin chào!' };
+        if (!msg) {
+            return res.status(400).json({
+                success: false,
+                error: "Missing required parameter: msg"
+            });
+        }
+        res.json({
+            success: true,
+            echo: msg,
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
+        console.error("Echo error:", err);
+        res.status(500).json({
+            success: false,
+            error: "Internal server error"
+        });
+    }
+});
+
+app.get("/users", async (req, res) => {
+    console.log("Received request", new Date().toISOString());
+
+    try {
+        // Query lấy name, email từ bảng users
+        const result = await pool.query("SELECT name, email FROM users");
+
+        res.json({
+            success: true,
+            count: result.rows.length,
+            users: result.rows
+        });
+    } catch (err) {
+        console.error("Error fetching users:", err);
+        res.status(500).json({
+            success: false,
+            error: "Internal server error"
+        });
+    }
+});
+
+// API test
 app.get("/", async (req, res) => {
     console.log("Received request", new Date());
     const result = await pool.query("SELECT NOW()");
     res.json({ now: result.rows[0] });
-});
-
-// API test
-app.get("/ok", async (req, res) => {
-    let rs = "Received ok" + new Date();
-    console.log("OK: ", rs);
-    res.json({ rs });
 });
 
 const PORT = process.env.PORT || 3000;
