@@ -12,6 +12,7 @@ const pool = new Pool({
 
 // API test
 app.get("/", async (req, res) => {
+    console.log("Received request", new Date());
     const result = await pool.query("SELECT NOW()");
     res.json({ now: result.rows[0] });
 });
