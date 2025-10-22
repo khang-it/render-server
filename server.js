@@ -13,13 +13,8 @@ const pool = new Pool({
 // API test
 app.get("/echo", async (req, res) => {
     try {
-        const { msg } = req.query || { msg: 'Xin chào!' };
-        if (!msg) {
-            return res.status(400).json({
-                success: false,
-                error: "Missing required parameter: msg"
-            });
-        }
+        const { msg = "Xin chào!" } = req.query;
+
         res.json({
             success: true,
             echo: msg,
