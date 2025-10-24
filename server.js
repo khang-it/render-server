@@ -1,9 +1,14 @@
+// server.js
 import express from "express";
 import pkg from "pg";
+import { WebSocketServer } from "ws";
+import cors from "cors";
 
 const { Pool } = pkg;
 const app = express();
-import cors from "cors";
+
+
+const PORT = process.env.PORT || 3000;
 
 // Kết nối PostgreSQL (lấy connection string trong Aiven)
 const pool = new Pool({
@@ -12,6 +17,7 @@ const pool = new Pool({
 });
 
 app.use(cors());
+
 
 // API test
 app.get("/echo", async (req, res) => {
@@ -60,5 +66,36 @@ app.get("/", async (req, res) => {
     res.json({ now: result.rows[0] });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
+const server = app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+});
+
+// ---- WebSocket dùng chung server này ----
+const wss = new WebSocketServer({ server });
+let clientId = 0;
+
+wss.on("connection", (ws) => {
+    clientId++;
+    ws.id = clientId;
+    console.log(`✅ Client #${ws.id} connected`);
+
+    ws.send(`👋 Welcome! You are User #${ws.id}`);
+
+    ws.on("message", (msg) => {
+        const text = msg.toString();
+        console.log(`📩 [User #${ws.id}] ${text}`);
+
+        // Gửi lại cho tất cả client, kể cả người gửi
+        wss.clients.forEach((client) => {
+            if (client.readyState === ws.OPEN) {
+                const prefix = client === ws ? "You" : `User #${ws.id}`;
+                client.send(`${prefix}: ${text}`);
+            }
+        });
+    });
+
+    ws.on("close", () => {
+        console.log(`❌ Client #${ws.id} disconnected`);
+    });
+});
