@@ -3,12 +3,15 @@ import pkg from "pg";
 
 const { Pool } = pkg;
 const app = express();
+import cors from "cors";
 
 // Kết nối PostgreSQL (lấy connection string trong Aiven)
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL, // để tiện dùng biến môi trường
     ssl: { rejectUnauthorized: false }          // Aiven yêu cầu SSL
 });
+
+app.use(cors());
 
 // API test
 app.get("/echo", async (req, res) => {
