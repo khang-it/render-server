@@ -23,7 +23,7 @@ app.use(cors());
 // API test
 app.get("/echo", async (req, res) => {
     try {
-        const { msg = "Xin chào!!" } = req.query;
+        const { msg = "Xin chào!! hihi" } = req.query;
 
         res.json({
             success: true,
