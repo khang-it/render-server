@@ -1,76 +1,294 @@
-// server.js
+// import dotenv from "dotenv";
+// dotenv.config();
+import pool from "./db.js";
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import crypto from "crypto";
+
+import passport from "passport";
+import GoogleStrategy from "passport-google-oauth20";
+
 import { WS } from "./websocket.js";
 
-// import pkg from "pg";
-// const { Pool } = pkg;
-// const PORT = process.env.PORT || 3000;
-// const pool = new Pool({
-//     connectionString: process.env.DATABASE_URL,
-//     ssl: { rejectUnauthorized: false }
-// });
-import pool from './db.js';
-
-const PORT = process.env.PORT || 3000;
 const app = express();
+app.use(express.json());
+app.use(cookieParser());
 
-app.use(cors());
+// =====================================
+// ✅ CORS DÙNG CHO FRONTEND HTTPS LOCAL
+// =====================================
+const FRONTEND_URL = "https://localhost:12345";
 
-// API test
+const allowedOrigins = [
+    "https://wh.io.vn",
+    "https://localhost:12345"
+];
+
+app.use(
+    cors({
+        origin: (origin, callback) => {
+            if (!origin || allowedOrigins.includes(origin)) {
+                callback(null, true);
+            } else {
+                callback(new Error("Not allowed by CORS"));
+            }
+        },
+        credentials: true,
+    })
+);
+
+// ================================
+// ✅ JWT helpers
+// ================================
+const ACCESS_TOKEN_TTL = "15m";
+const REFRESH_TOKEN_DAYS = 30;
+
+function signAccessToken(payload) {
+    return jwt.sign(payload, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: ACCESS_TOKEN_TTL,
+    });
+}
+
+function signRefreshToken(payload) {
+    return jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET, {
+        expiresIn: `${REFRESH_TOKEN_DAYS}d`,
+    });
+}
+
+function hashToken(token) {
+    return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+// ========================================================
+// ✅ COOKIE CHUẨN CHO HTTPS LOCAL
+// ========================================================
+function setRefreshCookie(res, token) {
+    res.cookie("refreshToken", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "None",
+        maxAge: REFRESH_TOKEN_DAYS * 86400000,
+        path: "/",
+    });
+}
+
+async function saveRefreshToken({ userId, token, ua, ip }) {
+    const hashed = hashToken(token);
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 86400000);
+
+    await pool.query(
+        `INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [userId, hashed, expiresAt, ua, ip]
+    );
+}
+
+async function revokeRefreshToken(token) {
+    const hashed = hashToken(token);
+    await pool.query(
+        `UPDATE refresh_tokens 
+         SET revoked_at = NOW() 
+         WHERE token_hash = $1 AND revoked_at IS NULL`,
+        [hashed]
+    );
+}
+
+async function isRefreshValid(token) {
+    try {
+        const payload = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET);
+        const hashed = hashToken(token);
+
+        const r = await pool.query(
+            `SELECT * FROM refresh_tokens 
+             WHERE token_hash = $1 
+             AND revoked_at IS NULL 
+             AND expires_at > NOW()`,
+            [hashed]
+        );
+
+        if (r.rows.length === 0) return null;
+        return { userId: payload.sub };
+    } catch {
+        return null;
+    }
+}
+
+function issueTokensAndRespond(res, user, options = { includeAccessInBody: true }) {
+    const accessToken = signAccessToken({ sub: user.id, email: user.email });
+    const refreshToken = signRefreshToken({ sub: user.id });
+
+    setRefreshCookie(res, refreshToken);
+
+    if (options.includeAccessInBody) {
+        res.json({
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                avatar: user.avatar || null,
+                provider: user.provider || "local",
+            },
+            accessToken,
+            expiresIn: ACCESS_TOKEN_TTL,
+        });
+    }
+
+    return { accessToken, refreshToken };
+}
+
+// ================================
+// ✅ Middleware
+// ================================
+function authBearer(req, res, next) {
+    const h = req.headers.authorization || "";
+    const [, token] = h.split(" ");
+
+    if (!token) return res.status(401).json({ error: "Missing token" });
+
+    try {
+        const payload = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        req.user = payload;
+        next();
+    } catch {
+        return res.status(401).json({ error: "Invalid token" });
+    }
+}
+
+// ================================
+// ✅ AUTH ROUTES
+// ================================
+
+app.get("/auth/create-pwd", async (req, res) => {
+    const password = req.query.password;
+    if (!password) {
+        return res.status(400).json({ error: "Thiếu password" });
+    }
+
+    try {
+        const hashed = await bcrypt.hash(password, 10);
+        return res.json({ password, hashed });
+    } catch (err) {
+        return res.status(500).json({ error: "Không tạo được mật khẩu" });
+    }
+});
+
+app.post("/auth/register", async (req, res) => {
+    const { name, email, password } = req.body;
+
+    const lower = email.toLowerCase().trim();
+    const exists = await pool.query("SELECT id FROM users WHERE email=$1", [lower]);
+
+    if (exists.rows.length > 0)
+        return res.status(409).json({ error: "Email đã tồn tại" });
+
+    const hashed = await bcrypt.hash(password, 10);
+
+    const ins = await pool.query(
+        `INSERT INTO users (name, email, password, provider)
+         VALUES ($1,$2,$3,$4)
+         RETURNING id, name, email, avatar, provider`,
+        [name, lower, hashed, "local"]
+    );
+
+    res.status(201).json({ user: ins.rows[0] });
+});
+
+app.post("/auth/login", async (req, res) => {
+    const { email, password } = req.body;
+
+    const lower = email.toLowerCase().trim();
+    const r = await pool.query("SELECT * FROM users WHERE email=$1", [lower]);
+
+    if (r.rows.length === 0)
+        return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
+
+    const user = r.rows[0];
+    const ok = await bcrypt.compare(password, user.password);
+
+    if (!ok)
+        return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
+
+    const { accessToken, refreshToken } = issueTokensAndRespond(res, user);
+
+    await saveRefreshToken({
+        userId: user.id,
+        token: refreshToken,
+        ua: req.headers["user-agent"],
+        ip: req.socket.remoteAddress,
+    });
+});
+
+app.get("/auth/me", async (req, res) => {
+    const refresh = req.cookies.refreshToken;
+    if (!refresh) return res.status(401).json({ user: null });
+    console.log('refresh:', refresh)
+    const valid = await isRefreshValid(refresh);
+    if (!valid) return res.status(401).json({ user: null });
+
+    const r = await pool.query(
+        "SELECT id, email, name, avatar, provider FROM users WHERE id=$1",
+        [valid.userId]
+    );
+
+    const user = r.rows[0];
+    const accessToken = signAccessToken({ sub: user.id, email: user.email });
+
+    return res.json({ user, accessToken });
+});
+
+app.post("/auth/logout", async (req, res) => {
+    const refresh = req.cookies.refreshToken;
+    if (refresh) await revokeRefreshToken(refresh);
+
+    res.clearCookie("refreshToken", { path: "/" });
+    res.json({ ok: true });
+});
+
+app.get("/api/profile", authBearer, async (req, res) => {
+    const r = await pool.query(
+        "SELECT id, email, name, avatar, provider FROM users WHERE id=$1",
+        [req.user.sub]
+    );
+    res.json({ user: r.rows[0] });
+});
+
+// ================================
+// ✅ ORIGINAL API (messages, etc.)
+// ================================
+
 app.get("/echo", async (req, res) => {
     try {
-        const { msg = "Xin chào!! 8/11 10:05" } = req.query;
-
-        res.json({
-            success: true,
-            echo: msg,
-            timestamp: new Date().toISOString()
-        });
+        const { msg = "Xin chào!!" } = req.query;
+        res.json({ success: true, echo: msg, timestamp: new Date().toISOString() });
     } catch (err) {
-        console.error("Echo error:", err);
-        res.status(500).json({
-            success: false,
-            error: "Internal server error"
-        });
+        res.status(500).json({ success: false, error: "Internal server error" });
     }
 });
 
 app.get("/users", async (req, res) => {
-    console.log("Received request", new Date().toISOString());
-
     try {
-        // Query lấy name, email từ bảng users
         const result = await pool.query("SELECT name, email FROM account");
-
         res.json({
             success: true,
             count: result.rows.length,
-            users: result.rows
+            users: result.rows,
         });
     } catch (err) {
-        console.error("Error fetching users:", err);
-        res.status(500).json({
-            success: false,
-            error: "Internal server error"
-        });
+        res.status(500).json({ success: false, error: "Internal server error" });
     }
 });
 
-
-// API test
 app.get("/", async (req, res) => {
-    console.log("Received request", new Date());
     const result = await pool.query("SELECT NOW()");
     res.json({ now: result.rows[0] });
 });
 
-// GET /messages?before=<created_at>&limit=50
-app.get('/messages', async (req, res) => {
+// GET /messages
+app.get("/messages", async (req, res) => {
     const { before, limit = 50, userId } = req.query;
-
-
-    console.log('get message', before, limit, userId)
 
     try {
         const params = [userId];
@@ -86,21 +304,28 @@ app.get('/messages', async (req, res) => {
 
         const { rows } = await pool.query(sql, params);
 
-        res.json(rows.reverse().map(msg => ({
-            id: msg.id,
-            senderId: msg.sender_id,
-            receiverId: msg.receiver_id,
-            message: msg.content,
-            created_at: msg.created_at
-        })));
+        res.json(
+            rows.reverse().map((msg) => ({
+                id: msg.id,
+                senderId: msg.sender_id,
+                receiverId: msg.receiver_id,
+                message: msg.content,
+                created_at: msg.created_at,
+            }))
+        );
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Error loading messages');
+        res.status(500).send("Error loading messages");
     }
 });
 
+// ================================
+// ✅ START SERVER + WebSocket
+// ================================
+const PORT = process.env.PORT || 3000;
 
-// --- WebSocket attach ---
-WS(app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-}), pool);
+const server = app.listen(PORT, () => {
+    console.log(`✅ SERVER running at http://localhost:${PORT}`);
+});
+
+// Gắn WebSocket
+WS(server, pool);
