@@ -27,7 +27,7 @@ const FRONTEND_URL = "https://localhost:12345";
 app.use(
     cors({
         origin: (origin, callback) => {
-            if (!origin) return callback(null, true); // Cho phép postman, curl, server-side
+            if (!origin) return callback(null, true);
             const allowedOrigins = [
                 'http://localhost:12345',
                 'https://localhost:12345',
@@ -76,7 +76,7 @@ function hashToken(token) {
 // ========================================================
 function setRefreshCookie(res, token) {
     const isLocal = process.env.NODE_ENV !== "production";
-    //console.log('isLocal:', isLocal)
+    console.log('isLocal:', isLocal)
     res.cookie("refreshToken", token, {
         httpOnly: true,
         secure: !isLocal,         // ✅ chỉ bật secure khi production
@@ -104,6 +104,15 @@ async function revokeRefreshToken(token) {
          SET revoked_at = NOW() 
          WHERE token_hash = $1 AND revoked_at IS NULL`,
         [hashed]
+    );
+}
+
+async function revokeAllTokensForUser(userId) {
+    await pool.query(
+        `UPDATE refresh_tokens 
+         SET revoked_at = NOW() 
+         WHERE user_id = $1 AND revoked_at IS NULL`,
+        [userId]
     );
 }
 
@@ -171,6 +180,61 @@ function authBearer(req, res, next) {
 // ================================
 // ✅ AUTH ROUTES
 // ================================
+
+// ========================================================
+// ✅ ADMIN ROUTES: Token Management
+// ========================================================
+
+// 🧩 Revoke all refresh tokens by user id
+app.post("/auth/revoke-by-account-id/:id", async (req, res) => {
+    const userId = req.params.id;
+
+    try {
+        await pool.query(
+            `UPDATE refresh_tokens
+             SET revoked_at = NOW()
+             WHERE user_id = $1 AND revoked_at IS NULL`,
+            [userId]
+        );
+
+        res.json({
+            success: true,
+            message: `Đã thu hồi toàn bộ refresh token của user_id=${userId}`,
+        });
+    } catch (err) {
+        console.error("Revoke by account id error:", err);
+        res.status(500).json({
+            success: false,
+            error: "Không thể thu hồi token",
+        });
+    }
+});
+
+// 🧹 Clean up old or expired tokens
+app.delete("/auth/clean-token", async (req, res) => {
+    const days = parseInt(req.query.days || "7", 10);
+    try {
+        const { rowCount } = await pool.query(
+            `
+            DELETE FROM refresh_tokens
+            WHERE expires_at < NOW()
+               OR (revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '${days} days')
+            `
+        );
+
+        res.json({
+            success: true,
+            message: `Đã xoá ${rowCount} token hết hạn hoặc đã thu hồi quá ${days} ngày.`,
+        });
+    } catch (err) {
+        console.error("Clean token error:", err);
+        res.status(500).json({
+            success: false,
+            error: "Không thể dọn dẹp token",
+        });
+    }
+});
+
 
 app.get("/auth/create-pwd", async (req, res) => {
     const password = req.query.password;
