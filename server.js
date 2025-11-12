@@ -36,7 +36,8 @@ app.use(
                 callback(new Error("Not allowed by CORS"));
             }
         },
-        credentials: true,
+        credentials: true, // Cho phép gửi cookie
+        optionsSuccessStatus: 200, // Tránh lỗi OPTIONS ở trình duyệt cũ
     })
 );
 
@@ -66,9 +67,11 @@ function hashToken(token) {
 // ✅ COOKIE CHUẨN CHO HTTPS LOCAL
 // ========================================================
 function setRefreshCookie(res, token) {
+    const isLocal = process.env.NODE_ENV !== "production";
+    console.log('isLocal:', isLocal)
     res.cookie("refreshToken", token, {
         httpOnly: true,
-        secure: true,
+        secure: !isLocal,         // ✅ chỉ bật secure khi production
         sameSite: "None",
         maxAge: REFRESH_TOKEN_DAYS * 86400000,
         path: "/",
@@ -261,7 +264,7 @@ app.get("/api/profile", authBearer, async (req, res) => {
 
 app.get("/echo", async (req, res) => {
     try {
-        const { msg = "Xin chào!!" } = req.query;
+        const { msg = "Xin chào!! Hello" } = req.query;
         res.json({ success: true, echo: msg, timestamp: new Date().toISOString() });
     } catch (err) {
         res.status(500).json({ success: false, error: "Internal server error" });
@@ -271,6 +274,7 @@ app.get("/echo", async (req, res) => {
 app.get("/users", async (req, res) => {
     try {
         const result = await pool.query("SELECT name, email FROM account");
+        console.log('users:', result.rows.length, new Date().getTime())
         res.json({
             success: true,
             count: result.rows.length,
