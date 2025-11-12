@@ -26,8 +26,21 @@ const FRONTEND_URL = "https://localhost:12345";
 
 app.use(
     cors({
-        origin: ['http://localhost:12345', 'https://wh.io.vn'],
-        credentials: true
+        origin: (origin, callback) => {
+            if (!origin) return callback(null, true); // Cho phép postman, curl, server-side
+            const allowedOrigins = [
+                'http://localhost:12345',
+                'https://localhost:12345',
+                'https://wh.io.vn',
+                'https://render-server-ezuf.onrender.com'
+            ];
+            if (allowedOrigins.includes(origin)) {
+                callback(null, true);
+            } else {
+                callback(new Error(`CORS blocked for origin: ${origin}`));
+            }
+        },
+        credentials: true,
     })
 );
 
