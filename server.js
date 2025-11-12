@@ -67,8 +67,8 @@ function hashToken(token) {
 // ✅ COOKIE CHUẨN CHO HTTPS LOCAL
 // ========================================================
 function setRefreshCookie(res, token) {
-    const isLocal = process.env.NODE_ENV !== "production";
-    console.log('isLocal:', isLocal)
+    const isLocal = false;//process.env.NODE_ENV !== "production";
+    //console.log('isLocal:', isLocal)
     res.cookie("refreshToken", token, {
         httpOnly: true,
         secure: !isLocal,         // ✅ chỉ bật secure khi production
@@ -202,15 +202,16 @@ app.post("/auth/register", async (req, res) => {
 app.post("/auth/login", async (req, res) => {
     const { email, password } = req.body;
 
+    console.log('info:', email, password)
     const lower = email.toLowerCase().trim();
     const r = await pool.query("SELECT * FROM users WHERE email=$1", [lower]);
-
+    console.log('info1:', r.rows)
     if (r.rows.length === 0)
         return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
 
     const user = r.rows[0];
     const ok = await bcrypt.compare(password, user.password);
-
+    console.log('info2:', ok)
     if (!ok)
         return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
 
@@ -226,8 +227,8 @@ app.post("/auth/login", async (req, res) => {
 
 app.get("/auth/me", async (req, res) => {
     const refresh = req.cookies.refreshToken;
-    if (!refresh) return res.status(401).json({ user: null });
     console.log('refresh:', refresh)
+    if (!refresh) return res.status(401).json({ user: null });
     const valid = await isRefreshValid(refresh);
     if (!valid) return res.status(401).json({ user: null });
 
