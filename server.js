@@ -22,22 +22,10 @@ app.use(cookieParser());
 // =====================================
 const FRONTEND_URL = "https://localhost:12345";
 
-const allowedOrigins = [
-    "https://wh.io.vn",
-    "https://localhost:12345"
-];
-
 app.use(
     cors({
-        origin: (origin, callback) => {
-            if (!origin || allowedOrigins.includes(origin)) {
-                callback(null, true);
-            } else {
-                callback(new Error("Not allowed by CORS"));
-            }
-        },
-        credentials: true, // Cho phép gửi cookie
-        optionsSuccessStatus: 200, // Tránh lỗi OPTIONS ở trình duyệt cũ
+        origin: ['http://localhost:12345', 'https://wh.io.vn'],
+        credentials: true
     })
 );
 
