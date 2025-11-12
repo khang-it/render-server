@@ -11,6 +11,8 @@ import crypto from "crypto";
 import passport from "passport";
 import GoogleStrategy from "passport-google-oauth20";
 
+import { requestLogger } from "./middleware/requestLogger.js";
+
 import { WS } from "./websocket.js";
 
 const app = express();
@@ -28,6 +30,11 @@ app.use(
         credentials: true
     })
 );
+
+// =====================================
+// ✅ GẮN MIDDLEWARE GHI LOG
+// =====================================
+app.use(requestLogger);
 
 // ================================
 // ✅ JWT helpers
@@ -55,7 +62,7 @@ function hashToken(token) {
 // ✅ COOKIE CHUẨN CHO HTTPS LOCAL
 // ========================================================
 function setRefreshCookie(res, token) {
-    const isLocal = false;//process.env.NODE_ENV !== "production";
+    const isLocal = process.env.NODE_ENV !== "production";
     //console.log('isLocal:', isLocal)
     res.cookie("refreshToken", token, {
         httpOnly: true,
