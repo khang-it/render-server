@@ -7,6 +7,9 @@ import cookieParser from "cookie-parser";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import fs from "fs";
+import http from "http";
+import https from "https";
 
 import passport from "passport";
 import GoogleStrategy from "passport-google-oauth20";
@@ -31,6 +34,8 @@ app.use(
             const allowedOrigins = [
                 'http://localhost:12345',
                 'https://localhost:12345',
+                'http://localhost:3000',
+                'https://localhost:3443',
                 'https://wh.io.vn',
                 'https://render-server-ezuf.onrender.com'
             ];
@@ -73,14 +78,16 @@ function hashToken(token) {
 
 // ========================================================
 // ✅ COOKIE CHUẨN CHO HTTPS LOCAL
-// ========================================================
+// ========================================================s
 function setRefreshCookie(res, token) {
     const isLocal = process.env.NODE_ENV !== "production";
-    //console.log('isLocal:', isLocal)
+    console.log('isLocal secure:', !isLocal)
     res.cookie("refreshToken", token, {
         httpOnly: true,
         secure: !isLocal,         // ✅ chỉ bật secure khi production
         sameSite: "None",
+        // secure: false,      // local http => MUST be false
+        // sameSite: "none",   // MUST be none for cross-origin localhost ports
         maxAge: REFRESH_TOKEN_DAYS * 86400000,
         path: "/",
     });
@@ -136,7 +143,7 @@ async function isRefreshValid(token) {
 }
 
 function issueTokensAndRespond(res, user, options = { includeAccessInBody: true }) {
-    console.log('ok::', user)
+    //console.log('ok::', user)
     const accessToken = signAccessToken({ sub: user.id, email: user.email });
     const refreshToken = signRefreshToken({ sub: user.id });
 
@@ -300,12 +307,11 @@ app.post("/auth/login", async (req, res) => {
 
 app.get("/auth/me", async (req, res) => {
     const refresh = req.cookies.refreshToken;
-    console.log('refresh:', refresh)
+
     if (!refresh) return res.status(401).json({ user: null });
     const valid = await isRefreshValid(refresh);
     if (!valid) return res.status(401).json({ user: null });
 
-    console.log('valid:', valid)
     const r = await pool.query(
         "SELECT id, email, name, avatar, provider FROM users WHERE id=$1",
         [valid.userId]
@@ -339,7 +345,7 @@ app.get("/api/profile", authBearer, async (req, res) => {
 
 app.get("/echo", async (req, res) => {
     try {
-        const { msg = "Xin chào!! Hello" } = req.query;
+        const { msg = "Xin chào!! 22" } = req.query;
         res.json({ success: true, echo: msg, timestamp: new Date().toISOString() });
     } catch (err) {
         res.status(500).json({ success: false, error: "Internal server error" });
@@ -400,11 +406,29 @@ app.get("/messages", async (req, res) => {
 // ================================
 // ✅ START SERVER + WebSocket
 // ================================
-const PORT = process.env.PORT || 3000;
+const HTTP_PORT = process.env.HTTP_PORT || 3000;
+const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 
-const server = app.listen(PORT, () => {
-    console.log(`✅ SERVER running at http://localhost:${PORT}`);
+// Load SSL key/cert
+const sslOptions = {
+    key: fs.readFileSync("./keys/cert-key.pem"),
+    cert: fs.readFileSync("./keys/cert.pem"),
+};
+
+// HTTP server
+const httpServer = http.createServer(app);
+
+// HTTPS server
+const httpsServer = https.createServer(sslOptions, app);
+
+// Start both
+httpServer.listen(HTTP_PORT, () => {
+    console.log(`🌐 HTTP running at http://localhost:${HTTP_PORT}`);
 });
 
-// Gắn WebSocket
-WS(server, pool);
+httpsServer.listen(HTTPS_PORT, () => {
+    console.log(`🔐 HTTPS running at https://localhost:${HTTPS_PORT}`);
+});
+
+// WebSocket gắn vào HTTPS (khuyến nghị)
+WS(httpsServer, pool);

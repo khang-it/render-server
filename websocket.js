@@ -16,7 +16,7 @@ export const WS = (server, pool) => {
     // ======================================================
     wss.on("connection", async (ws, req) => {
         try {
-            // debugMaps();
+            debugMaps();
             // Lấy refresh token từ cookie
             const cookies = cookie.parse(req.headers.cookie || "");
             const refreshToken = cookies.refreshToken;
@@ -38,7 +38,7 @@ export const WS = (server, pool) => {
                 ws.close();
                 return;
             }
-            console.log('payload:', payload, process.env.REFRESH_TOKEN_SECRET);
+            //console.log('payload:', payload, process.env.REFRESH_TOKEN_SECRET);
 
             const userId = payload.sub;
             //console.log('payload.sub userId:', userId)
@@ -58,14 +58,14 @@ export const WS = (server, pool) => {
             }
 
             const user = r.rows[0];
-            console.log('user:', user);
+            //console.log('user:', user);
 
             // Ghi nhận kết nối
             if (!userSockets.has(userId)) userSockets.set(userId, new Set());
             userSockets.get(userId).add(ws);
             wsInfo.set(ws, userId);
 
-            console.log(`✅ ${user.name} (${user.id}) connected (${userSockets.get(userId).size} socket)`);
+            //console.log(`✅ ${user.name} (${user.id}) connected (${userSockets.get(userId).size} socket)`);
 
             // Gửi xác nhận
             ws.send(JSON.stringify({
