@@ -19,6 +19,7 @@ import { requestLogger } from "./middleware/requestLogger.js";
 import { WS } from "./websocket.js";
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json());
 app.use(cookieParser());
 
@@ -34,8 +35,8 @@ app.use(
             const allowedOrigins = [
                 'http://localhost:12345',
                 'https://localhost:12345',
-                'http://localhost:3000',
-                'https://localhost:3443',
+                'http://localhost:4000',
+                'https://localhost:4443',
                 'https://wh.io.vn',
                 'https://render-server-ezuf.onrender.com'
             ];
@@ -80,14 +81,11 @@ function hashToken(token) {
 // ✅ COOKIE CHUẨN CHO HTTPS LOCAL
 // ========================================================s
 function setRefreshCookie(res, token) {
-    const isLocal = process.env.NODE_ENV !== "production";
-    console.log('isLocal secure:', !isLocal)
+    const isHTTPS = true;
     res.cookie("refreshToken", token, {
         httpOnly: true,
-        secure: !isLocal,         // ✅ chỉ bật secure khi production
+        secure: isHTTPS,
         sameSite: "None",
-        // secure: false,      // local http => MUST be false
-        // sameSite: "none",   // MUST be none for cross-origin localhost ports
         maxAge: REFRESH_TOKEN_DAYS * 86400000,
         path: "/",
     });
@@ -296,7 +294,7 @@ app.post("/auth/login", async (req, res) => {
 
     //console.log('post /auth/login:', user)
     const { accessToken, refreshToken } = issueTokensAndRespond(res, user);
-    console.log('send cookie refreshToken:', refreshToken)
+    //console.log('send cookie refreshToken:', refreshToken)
     await saveRefreshToken({
         userId: user.id,
         token: refreshToken,
@@ -406,13 +404,13 @@ app.get("/messages", async (req, res) => {
 // ================================
 // ✅ START SERVER + WebSocket
 // ================================
-const HTTP_PORT = process.env.HTTP_PORT || 3000;
-const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
+const HTTP_PORT = process.env.HTTP_PORT || 4000;
+const HTTPS_PORT = process.env.HTTPS_PORT || 4443;
 
 // Load SSL key/cert
 const sslOptions = {
-    key: fs.readFileSync("./keys/cert-key.pem"),
-    cert: fs.readFileSync("./keys/cert.pem"),
+    key: fs.readFileSync("./keys/localhost-key.pem"),
+    cert: fs.readFileSync("./keys/localhost.pem"),
 };
 
 // HTTP server
@@ -420,6 +418,9 @@ const httpServer = http.createServer(app);
 
 // HTTPS server
 const httpsServer = https.createServer(sslOptions, app);
+
+// WebSocket gắn vào HTTPS (khuyến nghị)
+WS(httpServer, pool);
 
 // Start both
 httpServer.listen(HTTP_PORT, () => {
@@ -430,5 +431,4 @@ httpsServer.listen(HTTPS_PORT, () => {
     console.log(`🔐 HTTPS running at https://localhost:${HTTPS_PORT}`);
 });
 
-// WebSocket gắn vào HTTPS (khuyến nghị)
-WS(httpsServer, pool);
+
