@@ -16,10 +16,12 @@ export const WS = (server, pool) => {
     // ======================================================
     wss.on("connection", async (ws, req) => {
         try {
+            // debugMaps();
             // Lấy refresh token từ cookie
             const cookies = cookie.parse(req.headers.cookie || "");
             const refreshToken = cookies.refreshToken;
             console.log('ws refreshToken:', refreshToken);
+            //console.log('ws userSockets:', wsInfo.entries());
 
             if (!refreshToken) {
                 ws.send(JSON.stringify({ error: "Missing refresh token" }));
@@ -36,15 +38,18 @@ export const WS = (server, pool) => {
                 ws.close();
                 return;
             }
+            console.log('payload:', payload, process.env.REFRESH_TOKEN_SECRET);
 
             const userId = payload.sub;
-            console.log('payload.sub userId:', userId)
+            //console.log('payload.sub userId:', userId)
 
             // Lấy thông tin user từ DB
             const r = await pool.query(
                 "SELECT id, name, email FROM users WHERE id=$1",
                 [userId]
             );
+
+            console.log('user:', r.rows[0], userId);
 
             if (r.rows.length === 0) {
                 ws.send(JSON.stringify({ error: "User not found" }));
@@ -53,6 +58,7 @@ export const WS = (server, pool) => {
             }
 
             const user = r.rows[0];
+            console.log('user:', user);
 
             // Ghi nhận kết nối
             if (!userSockets.has(userId)) userSockets.set(userId, new Set());
@@ -142,6 +148,7 @@ export const WS = (server, pool) => {
         } catch (err) {
             console.error("❌ WS connection error:", err);
             ws.close();
+            //debugMaps();
         }
     });
 
@@ -167,6 +174,20 @@ export const WS = (server, pool) => {
         sockets.forEach((ws) => {
             if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
         });
+    }
+
+    function debugMaps() {
+        console.log('--- WebSocket Maps ---', new Date().toISOString());
+        console.log('userSockets:', userSockets.size);
+        for (const [userId, sockets] of userSockets) {
+            console.log(`  ${userId} → ${sockets.size} socket(s)`);
+        }
+
+        console.log('wsInfo:', wsInfo.size);
+        for (const [ws, userId] of wsInfo) {
+            console.log(`  ws ${ws._socket?.remoteAddress || 'unknown'} → ${userId}`);
+        }
+        console.log('-----------------------');
     }
 
     return { wss, userSockets, sendToUser };

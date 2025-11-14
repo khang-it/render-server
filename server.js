@@ -47,7 +47,7 @@ app.use(
 // =====================================
 // ✅ GẮN MIDDLEWARE GHI LOG
 // =====================================
-app.use(requestLogger);
+//app.use(requestLogger);
 
 // ================================
 // ✅ JWT helpers
@@ -76,7 +76,7 @@ function hashToken(token) {
 // ========================================================
 function setRefreshCookie(res, token) {
     const isLocal = process.env.NODE_ENV !== "production";
-    console.log('isLocal:', isLocal)
+    //console.log('isLocal:', isLocal)
     res.cookie("refreshToken", token, {
         httpOnly: true,
         secure: !isLocal,         // ✅ chỉ bật secure khi production
@@ -128,7 +128,6 @@ async function isRefreshValid(token) {
              AND expires_at > NOW()`,
             [hashed]
         );
-
         if (r.rows.length === 0) return null;
         return { userId: payload.sub };
     } catch {
@@ -137,6 +136,7 @@ async function isRefreshValid(token) {
 }
 
 function issueTokensAndRespond(res, user, options = { includeAccessInBody: true }) {
+    console.log('ok::', user)
     const accessToken = signAccessToken({ sub: user.id, email: user.email });
     const refreshToken = signRefreshToken({ sub: user.id });
 
@@ -274,21 +274,22 @@ app.post("/auth/register", async (req, res) => {
 app.post("/auth/login", async (req, res) => {
     const { email, password } = req.body;
 
-    console.log('info:', email, password)
+    //console.log('info:', email, password)
     const lower = email.toLowerCase().trim();
     const r = await pool.query("SELECT * FROM users WHERE email=$1", [lower]);
-    console.log('info1:', r.rows)
+    //console.log('info1:', r.rows)
     if (r.rows.length === 0)
         return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
 
     const user = r.rows[0];
     const ok = await bcrypt.compare(password, user.password);
-    console.log('info2:', ok)
+    //console.log('info2:', ok)
     if (!ok)
         return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
 
+    //console.log('post /auth/login:', user)
     const { accessToken, refreshToken } = issueTokensAndRespond(res, user);
-
+    console.log('send cookie refreshToken:', refreshToken)
     await saveRefreshToken({
         userId: user.id,
         token: refreshToken,
@@ -304,6 +305,7 @@ app.get("/auth/me", async (req, res) => {
     const valid = await isRefreshValid(refresh);
     if (!valid) return res.status(401).json({ user: null });
 
+    console.log('valid:', valid)
     const r = await pool.query(
         "SELECT id, email, name, avatar, provider FROM users WHERE id=$1",
         [valid.userId]
