@@ -99,6 +99,7 @@ export const WS = (server, pool) => {
             ws.on("message", async (raw) => {
                 try {
                     const data = JSON.parse(raw.toString());
+                    console.log('data:', data);
                     if (data.type !== "chat") return;
 
                     const { to, message } = data;
