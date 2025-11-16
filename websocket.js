@@ -1,3 +1,4 @@
+// server-websocket.js
 import { WebSocketServer } from "ws";
 import cookie from "cookie";
 import jwt from "jsonwebtoken";
@@ -6,19 +7,23 @@ import { v7 as uuidv7 } from "uuid";
 export const WS = (server, pool) => {
     const wss = new WebSocketServer({ server });
 
-    const userSockets = new Map(); // user_id => Set<WebSocket>
-    const wsInfo = new Map();      // ws => user_id
+    // userId => { user, sockets: Set<WebSocket> }
+    const userSockets = new Map();
+    // ws => userId
+    const wsInfo = new Map();
 
     console.log("✅ WebSocket server started");
 
     wss.on("connection", async (ws, req) => {
         const ip = req.socket.remoteAddress;
         const port = req.socket.remotePort;
-
         console.log(`🔗 WS CONNECT from ${ip}:${port}`);
         debugMaps();
 
         try {
+            /* ---------------------------
+               1) Lấy refreshToken từ cookie
+            ----------------------------- */
             const cookies = cookie.parse(req.headers.cookie || "");
             const refreshToken = cookies.refreshToken;
 
@@ -28,9 +33,15 @@ export const WS = (server, pool) => {
                 return;
             }
 
+            /* ---------------------------
+               2) Xác thực Refresh Token
+            ----------------------------- */
             let payload;
             try {
-                payload = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+                payload = jwt.verify(
+                    refreshToken,
+                    process.env.REFRESH_TOKEN_SECRET
+                );
             } catch {
                 ws.send(JSON.stringify({ error: "Invalid or expired refresh token" }));
                 ws.close();
@@ -39,6 +50,9 @@ export const WS = (server, pool) => {
 
             const userId = payload.sub;
 
+            /* ---------------------------
+               3) Lấy thông tin user từ DB
+            ----------------------------- */
             const r = await pool.query(
                 `SELECT id, name, email FROM users WHERE id = $1`,
                 [userId]
@@ -52,24 +66,36 @@ export const WS = (server, pool) => {
 
             const user = r.rows[0];
 
-            // Lưu socket
-            if (!userSockets.has(userId)) userSockets.set(userId, new Set());
-            userSockets.get(userId).add(ws);
+            /* ---------------------------
+               4) Lưu socket vào Map
+            ----------------------------- */
+            if (!userSockets.has(userId)) {
+                userSockets.set(userId, {
+                    user,
+                    sockets: new Set()
+                });
+            }
+
+            userSockets.get(userId).sockets.add(ws);
             wsInfo.set(ws, userId);
 
-            console.log(`✅ ${user.name} (${user.id}) connected (${userSockets.get(userId).size} socket)`);
+            console.log(`✅ ${user.name} (${user.id}) connected (${userSockets.get(userId).sockets.size} sockets)`);
 
+            /* ---------------------------
+               5) Gửi welcome
+            ----------------------------- */
             ws.send(JSON.stringify({
                 type: "welcome",
                 user,
                 message: "👋 Connected"
             }));
 
+            // Broadcast danh sách user đang online
             broadcastUserList();
 
-            // ======================================================
-            // 📩 Message handler
-            // ======================================================
+            /* ======================================================
+               📩 HANDLE INCOMING MESSAGE
+            ====================================================== */
             ws.on("message", async (raw) => {
                 try {
                     const data = JSON.parse(raw.toString());
@@ -77,9 +103,9 @@ export const WS = (server, pool) => {
 
                     const { to, message } = data;
 
-                    // CHỖ FIX SQL: receiver_id luôn là số nguyên → không được NULL
                     const receiverId = to === "all" ? 0 : Number(to);
 
+                    // Save DB
                     await pool.query(
                         `INSERT INTO messages (id, sender_id, receiver_id, content)
                          VALUES ($1, $2, $3, $4)`,
@@ -87,21 +113,21 @@ export const WS = (server, pool) => {
                     );
 
                     if (to === "all") {
-                        // broadcast global
-                        for (const [uid, sockets] of userSockets.entries()) {
+                        // Broadcast to all
+                        for (const { sockets } of userSockets.values()) {
                             sockets.forEach(sock => {
                                 if (sock.readyState === sock.OPEN) {
                                     sock.send(JSON.stringify({
                                         type: "chat",
                                         from: user.name,
                                         to: "all",
-                                        message,
+                                        message
                                     }));
                                 }
                             });
                         }
                     } else {
-                        // gửi đến receiver
+                        // Send to receiver
                         sendToUser(receiverId, {
                             type: "chat",
                             from: user.name,
@@ -109,7 +135,7 @@ export const WS = (server, pool) => {
                             message
                         });
 
-                        // gửi lại cho chính sender
+                        // Echo back to sender
                         sendToUser(user.id, {
                             type: "chat",
                             from: user.name,
@@ -123,20 +149,24 @@ export const WS = (server, pool) => {
                 }
             });
 
-            // ======================================================
-            // ❌ Disconnect
-            // ======================================================
+            /* ======================================================
+               ❌ DISCONNECT
+            ====================================================== */
             ws.on("close", () => {
                 const uid = wsInfo.get(ws);
 
                 if (uid) {
-                    userSockets.get(uid)?.delete(ws);
-                    if (userSockets.get(uid)?.size === 0) userSockets.delete(uid);
-                    wsInfo.delete(ws);
+                    const entry = userSockets.get(uid);
+                    entry?.sockets.delete(ws);
 
+                    if (entry?.sockets.size === 0) {
+                        userSockets.delete(uid);
+                    }
+
+                    wsInfo.delete(ws);
                     broadcastUserList();
 
-                    console.log(`❌ ${user.name} disconnected (${userSockets.get(uid)?.size || 0} sockets left)`);
+                    console.log(`❌ ${user.name} disconnected (${entry?.sockets.size || 0} sockets left)`);
                 }
             });
 
@@ -147,52 +177,65 @@ export const WS = (server, pool) => {
         }
     });
 
-    // ======================================================
-    // 👥 Broadcast user list
-    // ======================================================
+    /* ======================================================
+       👥 BROADCAST USER LIST
+    ====================================================== */
     function broadcastUserList() {
+        const usersOnline = [];
+
+        for (const { user } of userSockets.values()) {
+            usersOnline.push({
+                id: user.id,
+                name: user.name,
+                email: user.email
+            });
+        }
+
         const payload = JSON.stringify({
             type: "users",
-            users: [...userSockets.keys()]
+            users: usersOnline
         });
 
-        for (const sockets of userSockets.values()) {
+        for (const { sockets } of userSockets.values()) {
             sockets.forEach(ws => {
                 if (ws.readyState === ws.OPEN) ws.send(payload);
             });
         }
     }
 
-    // ======================================================
-    // 📤 Send to specific user
-    // ======================================================
+    /* ======================================================
+       📤 SEND MESSAGE TO SPECIFIC USER
+    ====================================================== */
     function sendToUser(userId, payload) {
-        const sockets = userSockets.get(userId);
-        if (!sockets) return;
-        sockets.forEach(ws => {
-            if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
+        const entry = userSockets.get(userId);
+        if (!entry) return;
+
+        entry.sockets.forEach(ws => {
+            if (ws.readyState === ws.OPEN) {
+                ws.send(JSON.stringify(payload));
+            }
         });
     }
 
-    // ======================================================
-    // 🔍 Debug maps
-    // ======================================================
+    /* ======================================================
+       🔍 DEBUG MAPS
+    ====================================================== */
     function debugMaps() {
         console.log("\n========== 🔍 WS DEBUG MAPS ==========");
         console.log(`👥 Total users connected: ${userSockets.size}`);
 
-        for (const [userId, sockets] of userSockets) {
-            console.log(`  • User ${userId}: ${sockets.size} socket(s)`);
-            for (const ws of sockets) {
+        for (const [uid, entry] of userSockets.entries()) {
+            console.log(`  • User ${uid}: ${entry.sockets.size} sockets`);
+            for (const ws of entry.sockets) {
                 const s = ws._socket;
                 console.log(`      - Socket ${s.remoteAddress}:${s.remotePort} | readyState=${ws.readyState}`);
             }
         }
 
         console.log(`\n🔌 Total sockets: ${wsInfo.size}`);
-        for (const [ws, userId] of wsInfo) {
+        for (const [ws, uid] of wsInfo) {
             const s = ws._socket;
-            console.log(`  • Socket ${s.remoteAddress}:${s.remotePort} → User ${userId}`);
+            console.log(`  • Socket ${s.remoteAddress}:${s.remotePort} → User ${uid}`);
         }
         console.log("======================================\n");
     }

@@ -341,6 +341,10 @@ app.get("/api/profile", authBearer, async (req, res) => {
 // ✅ ORIGINAL API (messages, etc.)
 // ================================
 
+app.get('/api/endo/results', async (req, res) => {
+    res.json({ success: true, timestamp: new Date().toISOString() });
+});
+
 app.get("/echo", async (req, res) => {
     try {
         const { msg = "Xin chào!! 22" } = req.query;
