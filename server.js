@@ -87,6 +87,7 @@ function setRefreshCookie(res, token) {
         secure: isHTTPS,
         sameSite: "None",
         maxAge: REFRESH_TOKEN_DAYS * 86400000,
+        domain: ".wh.io.vn",
         path: "/",
     });
 }
