@@ -141,13 +141,34 @@ async function isRefreshValid(token) {
     }
 }
 
+// function issueTokensAndRespond(res, user, options = { includeAccessInBody: true }) {
+//     //console.log('ok::', user)
+//     const accessToken = signAccessToken({ sub: user.id, email: user.email });
+//     const refreshToken = signRefreshToken({ sub: user.id });
+
+//     setRefreshCookie(res, refreshToken);
+
+//     if (options.includeAccessInBody) {
+//         res.json({
+//             user: {
+//                 id: user.id,
+//                 email: user.email,
+//                 name: user.name,
+//                 avatar: user.avatar || null,
+//                 provider: user.provider || "local",
+//             },
+//             accessToken,
+//             expiresIn: ACCESS_TOKEN_TTL,
+//         });
+//     }
+
+//     return { accessToken, refreshToken };
+// }
+
 function issueTokensAndRespond(res, user, options = { includeAccessInBody: true }) {
-    //console.log('ok::', user)
     const accessToken = signAccessToken({ sub: user.id, email: user.email });
     const refreshToken = signRefreshToken({ sub: user.id });
-
-    setRefreshCookie(res, refreshToken);
-
+    //setRefreshCookie(res, refreshToken);
     if (options.includeAccessInBody) {
         res.json({
             user: {
@@ -158,6 +179,7 @@ function issueTokensAndRespond(res, user, options = { includeAccessInBody: true 
                 provider: user.provider || "local",
             },
             accessToken,
+            refreshToken,  // 👈 trả về ở đây
             expiresIn: ACCESS_TOKEN_TTL,
         });
     }
@@ -192,6 +214,9 @@ function authBearer(req, res, next) {
 // ========================================================
 
 // 🧩 Revoke all refresh tokens by user id
+
+
+
 app.post("/auth/revoke-by-account-id/:id", async (req, res) => {
     const userId = req.params.id;
 
@@ -305,11 +330,33 @@ app.post("/auth/login", async (req, res) => {
 });
 
 app.get("/auth/me", async (req, res) => {
-    const refresh = req.cookies.refreshToken;
-    console.log('refresh auth me:', refresh)
-    if (!refresh) return res.status(401).json({ user: null });
-    const valid = await isRefreshValid(refresh);
-    if (!valid) return res.status(401).json({ user: null });
+    const h = req.headers.authorization || "";
+    const [, token] = h.split(" ");
+
+    if (!token) return res.status(401).json({ user: null });
+
+    try {
+        const payload = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+
+        const r = await pool.query(
+            "SELECT id, email, name, avatar, provider FROM users WHERE id=$1",
+            [payload.sub]
+        );
+
+        return res.json({ user: r.rows[0] });
+
+    } catch (err) {
+        return res.status(401).json({ user: null });
+    }
+});
+
+app.post("/auth/refresh", async (req, res) => {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) return res.status(401).json({ error: "Missing refresh token" });
+
+    const valid = await isRefreshValid(refreshToken);
+    if (!valid) return res.status(401).json({ error: "Invalid refresh token" });
 
     const r = await pool.query(
         "SELECT id, email, name, avatar, provider FROM users WHERE id=$1",
@@ -317,16 +364,35 @@ app.get("/auth/me", async (req, res) => {
     );
 
     const user = r.rows[0];
-    const accessToken = signAccessToken({ sub: user.id, email: user.email });
 
-    return res.json({ user, accessToken });
+    const newAccess = signAccessToken({ sub: user.id, email: user.email });
+    const newRefresh = signRefreshToken({ sub: user.id });
+
+    await saveRefreshToken({
+        userId: user.id,
+        token: newRefresh,
+        ua: req.headers["user-agent"],
+        ip: req.socket.remoteAddress,
+    });
+
+    return res.json({
+        accessToken: newAccess,
+        refreshToken: newRefresh,
+    });
 });
 
-app.post("/auth/logout", async (req, res) => {
-    const refresh = req.cookies.refreshToken;
-    if (refresh) await revokeRefreshToken(refresh);
+// app.post("/auth/logout", async (req, res) => {
+//     const refresh = req.cookies.refreshToken;
+//     if (refresh) await revokeRefreshToken(refresh);
 
-    res.clearCookie("refreshToken", { path: "/" });
+//     res.clearCookie("refreshToken", { path: "/" });
+//     res.json({ ok: true });
+// });
+app.post("/auth/logout", async (req, res) => {
+    const { refreshToken } = req.body; // <-- client gửi refresh token
+
+    if (refreshToken) await revokeRefreshToken(refreshToken);
+
     res.json({ ok: true });
 });
 
