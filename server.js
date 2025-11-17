@@ -306,7 +306,7 @@ app.post("/auth/login", async (req, res) => {
 
 app.get("/auth/me", async (req, res) => {
     const refresh = req.cookies.refreshToken;
-
+    console.log('refresh auth me:', refresh)
     if (!refresh) return res.status(401).json({ user: null });
     const valid = await isRefreshValid(refresh);
     if (!valid) return res.status(401).json({ user: null });
