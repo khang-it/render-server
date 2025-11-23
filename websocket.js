@@ -1,6 +1,5 @@
 // server-websocket.js
 import { WebSocketServer } from "ws";
-import cookie from "cookie";
 import jwt from "jsonwebtoken";
 import { v7 as uuidv7 } from "uuid";
 
@@ -14,168 +13,164 @@ export const WS = (server, pool) => {
 
     console.log("✅ WebSocket server started");
 
-    wss.on("connection", async (ws, req) => {
+    wss.on("connection", (ws, req) => {
         const ip = req.socket.remoteAddress;
         const port = req.socket.remotePort;
-        console.log(`🔗 WS CONNECT from ${ip}:${port}`);
+
         debugMaps();
 
-        try {
-            /* ---------------------------
-               1) Lấy refreshToken từ cookie
-            ----------------------------- */
-            const cookies = cookie.parse(req.headers.cookie || "");
-            const refreshToken = cookies.refreshToken;
+        ws.isAuth = false;     // 🔥 client chưa authenticate
+        ws.user = null;
 
-            if (!refreshToken) {
-                ws.send(JSON.stringify({ error: "Missing refresh token" }));
-                ws.close();
-                return;
-            }
-
-            /* ---------------------------
-               2) Xác thực Refresh Token
-            ----------------------------- */
-            let payload;
+        /* ======================================================
+           📩 RECEIVE MESSAGE
+        ====================================================== */
+        ws.on("message", async (raw) => {
+            let data;
             try {
-                payload = jwt.verify(
-                    refreshToken,
-                    process.env.REFRESH_TOKEN_SECRET
-                );
-            } catch {
-                ws.send(JSON.stringify({ error: "Invalid or expired refresh token" }));
-                ws.close();
+                data = JSON.parse(raw.toString());
+            } catch (err) {
+                console.warn("⚠️ Invalid WS message:", raw.toString());
                 return;
             }
 
-            const userId = payload.sub;
+            /* ================================================
+               1) AUTH MESSAGE
+            ================================================= */
+            if (data.type === "auth") {
+                const token = data.token;
+                //console.log('ok:', data);
 
-            /* ---------------------------
-               3) Lấy thông tin user từ DB
-            ----------------------------- */
-            const r = await pool.query(
-                `SELECT id, name, email FROM users WHERE id = $1`,
-                [userId]
-            );
+                if (!token) {
+                    ws.send(JSON.stringify({ type: "auth_error", message: "Missing access token" }));
+                    ws.close();
+                    return;
+                }
 
-            if (r.rows.length === 0) {
-                ws.send(JSON.stringify({ error: "User not found" }));
-                ws.close();
-                return;
-            }
-
-            const user = r.rows[0];
-
-            /* ---------------------------
-               4) Lưu socket vào Map
-            ----------------------------- */
-            if (!userSockets.has(userId)) {
-                userSockets.set(userId, {
-                    user,
-                    sockets: new Set()
-                });
-            }
-
-            userSockets.get(userId).sockets.add(ws);
-            wsInfo.set(ws, userId);
-
-            console.log(`✅ ${user.name} (${user.id}) connected (${userSockets.get(userId).sockets.size} sockets)`);
-
-            /* ---------------------------
-               5) Gửi welcome
-            ----------------------------- */
-            ws.send(JSON.stringify({
-                type: "welcome",
-                user,
-                message: "👋 Connected"
-            }));
-
-            // Broadcast danh sách user đang online
-            broadcastUserList();
-
-            /* ======================================================
-               📩 HANDLE INCOMING MESSAGE
-            ====================================================== */
-            ws.on("message", async (raw) => {
+                let payload;
                 try {
-                    const data = JSON.parse(raw.toString());
-                    console.log('data:', data);
-                    if (data.type !== "chat") return;
-
-                    const { to, message } = data;
-
-                    const receiverId = to === "all" ? 0 : Number(to);
-
-                    // Save DB
-                    await pool.query(
-                        `INSERT INTO messages (id, sender_id, receiver_id, content)
-                         VALUES ($1, $2, $3, $4)`,
-                        [uuidv7(), user.id, receiverId, message]
-                    );
-
-                    if (to === "all") {
-                        // Broadcast to all
-                        for (const { sockets } of userSockets.values()) {
-                            sockets.forEach(sock => {
-                                if (sock.readyState === sock.OPEN) {
-                                    sock.send(JSON.stringify({
-                                        type: "chat",
-                                        from: user.name,
-                                        to: "all",
-                                        message
-                                    }));
-                                }
-                            });
-                        }
-                    } else {
-                        // Send to receiver
-                        sendToUser(receiverId, {
-                            type: "chat",
-                            from: user.name,
-                            to: receiverId,
-                            message
-                        });
-
-                        // Echo back to sender
-                        sendToUser(user.id, {
-                            type: "chat",
-                            from: user.name,
-                            to: receiverId,
-                            message
-                        });
-                    }
-
+                    payload = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
                 } catch (err) {
-                    console.error("❌ WS message error:", err);
+                    ws.send(JSON.stringify({ type: "auth_error", message: "Invalid or expired token" }));
+                    ws.close();
+                    return;
                 }
-            });
 
-            /* ======================================================
-               ❌ DISCONNECT
-            ====================================================== */
-            ws.on("close", () => {
-                const uid = wsInfo.get(ws);
+                const userId = payload.sub;
 
-                if (uid) {
-                    const entry = userSockets.get(uid);
-                    entry?.sockets.delete(ws);
+                // Lấy user từ DB
+                const r = await pool.query(
+                    `SELECT id, name, email FROM users WHERE id = $1`,
+                    [userId]
+                );
 
-                    if (entry?.sockets.size === 0) {
-                        userSockets.delete(uid);
+                if (r.rows.length === 0) {
+                    ws.send(JSON.stringify({ type: "auth_error", message: "User not found" }));
+                    ws.close();
+                    return;
+                }
+
+                const user = r.rows[0];
+
+                ws.isAuth = true;
+                ws.user = user;
+
+                // Map <userId, sockets>
+                if (!userSockets.has(userId)) {
+                    userSockets.set(userId, { user, sockets: new Set() });
+                }
+                userSockets.get(userId).sockets.add(ws);
+                wsInfo.set(ws, userId);
+
+                console.log(`🟢 ${user.name} authenticated (${userId})`);
+
+                ws.send(JSON.stringify({
+                    type: "welcome",
+                    user,
+                    message: "👋 Authenticated & connected"
+                }));
+
+                broadcastUserList();
+                return;
+            }
+
+            /* ================================================
+               2) CHẶN TIN NHẮN KHI CHƯA AUTH
+            ================================================= */
+            if (!ws.isAuth) {
+                ws.send(JSON.stringify({ type: "error", message: "Unauthorized" }));
+                return;
+            }
+
+            const user = ws.user;
+
+            /* ================================================
+               3) CHAT MESSAGE
+            ================================================= */
+            if (data.type === "chat") {
+                const { to, message } = data;
+                const receiverId = to === "all" ? 0 : Number(to);
+
+                // Save DB
+                await pool.query(
+                    `INSERT INTO messages (id, sender_id, receiver_id, content)
+                     VALUES ($1, $2, $3, $4)`,
+                    [uuidv7(), user.id, receiverId, message]
+                );
+
+                if (to === "all") {
+                    // Broadcast to all
+                    for (const { sockets } of userSockets.values()) {
+                        sockets.forEach(sock => {
+                            if (sock.readyState === sock.OPEN) {
+                                sock.send(JSON.stringify({
+                                    type: "chat",
+                                    from: user.name,
+                                    to: "all",
+                                    message
+                                }));
+                            }
+                        });
                     }
+                } else {
+                    // Gửi tới receiver
+                    sendToUser(receiverId, {
+                        type: "chat",
+                        from: user.name,
+                        to: receiverId,
+                        message
+                    });
 
-                    wsInfo.delete(ws);
-                    broadcastUserList();
-
-                    console.log(`❌ ${user.name} disconnected (${entry?.sockets.size || 0} sockets left)`);
+                    // Echo sender
+                    sendToUser(user.id, {
+                        type: "chat",
+                        from: user.name,
+                        to: receiverId,
+                        message
+                    });
                 }
-            });
+            }
+        });
 
-        } catch (err) {
-            console.error("❌ WS ERROR:", err);
-            ws.close();
-            debugMaps();
-        }
+        /* ======================================================
+           ❌ DISCONNECT
+        ====================================================== */
+        ws.on("close", () => {
+            const uid = wsInfo.get(ws);
+            if (uid) {
+                const entry = userSockets.get(uid);
+                entry?.sockets.delete(ws);
+
+                if (entry && entry.sockets.size === 0) {
+                    userSockets.delete(uid);
+                }
+
+                wsInfo.delete(ws);
+                broadcastUserList();
+
+                console.log(`❌ Disconnected user ${uid}`);
+            }
+        });
     });
 
     /* ======================================================
@@ -242,4 +237,5 @@ export const WS = (server, pool) => {
     }
 
     return { wss, userSockets, sendToUser };
+
 };
