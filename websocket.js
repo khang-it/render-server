@@ -17,6 +17,7 @@ export const WS = (server, pool) => {
         const ip = req.socket.remoteAddress;
         const port = req.socket.remotePort;
 
+        //console.log('req:', req)
         debugMaps();
 
         ws.isAuth = false;     // 🔥 client chưa authenticate
@@ -150,6 +151,33 @@ export const WS = (server, pool) => {
                     });
                 }
             }
+
+            // ====================
+            // LOAD HISTORY
+            // ====================
+            if (data.type === "load_messages") {
+                const partnerId = Number(data.partnerId);
+                const userId = ws.user.id;
+
+                const result = await pool.query(`
+            SELECT id, sender_id, receiver_id, content, created_at
+            FROM messages
+            WHERE
+                (sender_id = $1 AND receiver_id = $2)
+             OR (sender_id = $2 AND receiver_id = $1)
+            ORDER BY created_at DESC
+            LIMIT 50
+        `, [userId, partnerId]);
+
+                ws.send(JSON.stringify({
+                    type: "messages",
+                    partnerId,
+                    rows: result.rows.reverse()
+                }));
+
+                return;
+            }
+
         });
 
         /* ======================================================
