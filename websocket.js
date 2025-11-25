@@ -91,6 +91,8 @@ export const WS = (server, pool) => {
                     message: "👋 Authenticated & connected"
                 }));
 
+                await sendRecentContacts(ws);
+
                 broadcastUserList();
                 return;
             }
@@ -118,6 +120,10 @@ export const WS = (server, pool) => {
                      VALUES ($1, $2, $3, $4)`,
                     [uuidv7(), user.id, receiverId, message]
                 );
+
+                // Cập nhật danh sách recent contacts cho cả người gửi và người nhận
+                sendRecentContactsToUser(user.id);
+                sendRecentContactsToUser(receiverId);
 
                 if (to === "all") {
                     // Broadcast to all
@@ -273,6 +279,58 @@ export const WS = (server, pool) => {
             console.log(`  • Socket ${s.remoteAddress}:${s.remotePort} → User ${uid}`);
         }
         console.log("======================================\n");
+    }
+
+    // Hàm chính: gửi danh sách 50 người chat gần nhất cho 1 ws
+    async function sendRecentContacts(ws) {
+        if (!ws.isAuth || !ws.user) return;
+        const userId = ws.user.id;
+
+        try {
+            const result = await pool.query(`
+            SELECT 
+                u.id,
+                u.name,
+                u.email,
+                lm.last_message_at,
+                lm.content AS last_message_preview
+            FROM users u
+            LEFT JOIN LATERAL (
+                SELECT 
+                    m.created_at AS last_message_at,
+                    m.content
+                FROM messages m
+                WHERE (m.sender_id = u.id AND m.receiver_id = $1)
+                OR (m.sender_id = $1 AND m.receiver_id = u.id)
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT 1
+            ) lm ON true
+            WHERE u.id != $1
+            ORDER BY 
+                lm.last_message_at DESC NULLS LAST,  
+                u.name ASC                            
+            LIMIT 50;                                 
+        `, [userId]);
+
+            const contacts = result.rows.map(r => ({
+                id: r.id,
+                name: r.name,
+                email: r.email,
+                lastMessageAt: r.last_message_at,
+                lastMessagePreview: r.last_message_preview || ""
+            }));
+
+            ws.send(JSON.stringify({ type: "recent_contacts", contacts }));
+        } catch (err) {
+            console.error("Error loading recent contacts:", err);
+        }
+    }
+
+    // Hàm phụ: gửi cho tất cả socket của 1 user
+    function sendRecentContactsToUser(userId) {
+        const entry = userSockets.get(userId);
+        if (!entry) return;
+        entry.sockets.forEach(ws => sendRecentContacts(ws));
     }
 
     return { wss, userSockets, sendToUser };
