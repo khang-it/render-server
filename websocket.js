@@ -115,47 +115,29 @@ export const WS = (server, pool) => {
                 const receiverId = to === "all" ? 0 : Number(to);
 
                 // Save DB
-                await pool.query(
-                    `INSERT INTO messages (id, sender_id, receiver_id, content)
-                     VALUES ($1, $2, $3, $4)`,
-                    [uuidv7(), user.id, receiverId, message]
-                );
+                const msgSaved = await saveMessage(user.id, receiverId, message);
 
                 // Cập nhật danh sách recent contacts cho cả người gửi và người nhận
                 sendRecentContactsToUser(user.id);
                 sendRecentContactsToUser(receiverId);
 
-                if (to === "all") {
-                    // Broadcast to all
-                    for (const { sockets } of userSockets.values()) {
-                        sockets.forEach(sock => {
-                            if (sock.readyState === sock.OPEN) {
-                                sock.send(JSON.stringify({
-                                    type: "chat",
-                                    from: user.name,
-                                    to: "all",
-                                    message
-                                }));
-                            }
-                        });
+                const content = {
+                    type: "chat",
+                    payload: {
+                        id: msgSaved.id,
+                        type: 'text',
+                        from: user.id,
+                        to: receiverId,
+                        message: msgSaved.content
                     }
-                } else {
-                    // Gửi tới receiver
-                    sendToUser(receiverId, {
-                        type: "chat",
-                        from: user.name,
-                        to: receiverId,
-                        message
-                    });
+                };
 
-                    // Echo sender
-                    sendToUser(user.id, {
-                        type: "chat",
-                        from: user.name,
-                        to: receiverId,
-                        message
-                    });
-                }
+                // Gửi tới receiver
+                sendToUser(receiverId, content);
+
+                // Echo sender
+                sendToUser(user.id, content);
+
             }
 
             // ====================
@@ -171,7 +153,7 @@ export const WS = (server, pool) => {
             WHERE
                 (sender_id = $1 AND receiver_id = $2)
              OR (sender_id = $2 AND receiver_id = $1)
-            ORDER BY created_at DESC, id
+           ORDER BY created_at DESC, id DESC
             LIMIT 50
         `, [userId, partnerId]);
 
@@ -281,6 +263,20 @@ export const WS = (server, pool) => {
         console.log("======================================\n");
     }
 
+    // save DB
+    async function saveMessage(senderId, receiverId, content) {
+        const id = uuidv7();
+        const sql = `
+        INSERT INTO messages (id, sender_id, receiver_id, content)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, sender_id, receiver_id, content, created_at
+    `;
+
+        const result = await pool.query(sql, [id, senderId, receiverId, content]);
+
+        return result.rows[0];
+    }
+
     // Hàm chính: gửi danh sách 50 người chat gần nhất cho 1 ws
     async function sendRecentContacts(ws) {
         if (!ws.isAuth || !ws.user) return;
@@ -317,8 +313,10 @@ export const WS = (server, pool) => {
                 name: r.name,
                 email: r.email,
                 lastMessageAt: r.last_message_at,
-                lastMessagePreview: r.last_message_preview || ""
+                lastMessagePreview: r.last_message_preview || "",
+                online: userSockets.has(r.id)  // <--- CHECK ONLINE
             }));
+
 
             ws.send(JSON.stringify({ type: "recent_contacts", contacts }));
         } catch (err) {
