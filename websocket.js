@@ -165,14 +165,25 @@ export const WS = (server, pool) => {
             WHERE
                 (sender_id = $1 AND receiver_id = $2)
              OR (sender_id = $2 AND receiver_id = $1)
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id
             LIMIT 50
         `, [userId, partnerId]);
+
+                const rows = result.rows.map(r => ({
+                    id: r.id,
+                    from: r.sender_id,
+                    to: r.receiver_id,
+                    message: r.content,
+                    created_at: r.created_at,
+                    type: 'text'
+                }));
+
+                console.log('myId->partnerId:', userId, partnerId, result?.rows?.length);
 
                 ws.send(JSON.stringify({
                     type: "messages",
                     partnerId,
-                    rows: result.rows.reverse()
+                    rows: rows
                 }));
 
                 return;
