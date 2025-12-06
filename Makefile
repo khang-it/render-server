@@ -74,3 +74,8 @@ export:
 	@echo 'echo "Project recreated successfully!"' >> ./create.sh
 	@chmod +x ./create.sh
 	@echo "create.sh generated (text-only, UTF-8 safe)!"
+
+deploy-app:
+	@echo "📦 Building FE..."
+	@$(MAKE) -C $(FE_DIR) dist-app
+	@echo "🎉 DONE!"

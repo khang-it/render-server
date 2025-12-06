@@ -85,9 +85,8 @@ function setRefreshCookie(res, token) {
     res.cookie("refreshToken", token, {
         httpOnly: true,
         secure: isHTTPS,
-        sameSite: "None",
+        sameSite: isHTTPS ? "None" : "Lax",
         maxAge: REFRESH_TOKEN_DAYS * 86400000,
-        domain: ".wh.io.vn",
         path: "/",
     });
 }
@@ -168,7 +167,7 @@ async function isRefreshValid(token) {
 function issueTokensAndRespond(res, user, options = { includeAccessInBody: true }) {
     const accessToken = signAccessToken({ sub: user.id, email: user.email });
     const refreshToken = signRefreshToken({ sub: user.id });
-    //setRefreshCookie(res, refreshToken);
+    setRefreshCookie(res, refreshToken);
     if (options.includeAccessInBody) {
         res.json({
             user: {
@@ -351,12 +350,16 @@ app.get("/auth/me", async (req, res) => {
 });
 
 app.post("/auth/refresh", async (req, res) => {
-    const { refreshToken } = req.body;
-
-    if (!refreshToken) return res.status(401).json({ error: "Missing refresh token" });
+    const refreshToken = req.cookies.refreshToken || req.body.refreshToken;
+    console.log('refreshToken:', refreshToken)
+    if (!refreshToken) {
+        return res.status(401).json({ error: "Missing refresh token" });
+    }
 
     const valid = await isRefreshValid(refreshToken);
-    if (!valid) return res.status(401).json({ error: "Invalid refresh token" });
+    if (!valid) {
+        return res.status(401).json({ error: "Invalid refresh token" });
+    }
 
     const r = await pool.query(
         "SELECT id, email, name, avatar, provider FROM users WHERE id=$1",
@@ -368,12 +371,15 @@ app.post("/auth/refresh", async (req, res) => {
     const newAccess = signAccessToken({ sub: user.id, email: user.email });
     const newRefresh = signRefreshToken({ sub: user.id });
 
+    // ✅ rotate refresh token
     await saveRefreshToken({
         userId: user.id,
         token: newRefresh,
         ua: req.headers["user-agent"],
         ip: req.socket.remoteAddress,
     });
+
+    setRefreshCookie(res, newRefresh);
 
     return res.json({
         accessToken: newAccess,
