@@ -56,7 +56,7 @@ export const WS = (server, pool) => {
                     ws.close();
                     return;
                 }
-                console.log('payload:', payload);
+                //console.log('payload:', payload);
 
                 const userId = payload.sub;
 
@@ -121,7 +121,7 @@ export const WS = (server, pool) => {
                 // Cập nhật danh sách recent contacts cho cả người gửi và người nhận
                 sendRecentContactsToUser(user.id);
                 sendRecentContactsToUser(receiverId);
-
+                console.log('msgSaved:', msgSaved)
                 const content = {
                     type: "chat",
                     payload: {
@@ -129,7 +129,8 @@ export const WS = (server, pool) => {
                         type: 'text',
                         from: user.id,
                         to: receiverId,
-                        message: msgSaved.content
+                        message: msgSaved.content,
+                        created_at: msgSaved.created_at
                     }
                 };
 
@@ -282,7 +283,7 @@ export const WS = (server, pool) => {
     async function sendRecentContacts(ws) {
         if (!ws.isAuth || !ws.user) return;
         const userId = ws.user.id;
-        console.log('user connect:', ws.user)
+        //console.log('user connect:', ws.user)
 
         try {
             const result = await pool.query(`
@@ -310,7 +311,7 @@ export const WS = (server, pool) => {
             LIMIT 50;                                 
         `, [userId]);
 
-            console.log('list user:', result.rows)
+            //console.log('list user:', result.rows)
 
             const contacts = result.rows.map(r => ({
                 id: r.id,
