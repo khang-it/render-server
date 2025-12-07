@@ -40,7 +40,7 @@ export const WS = (server, pool) => {
             ================================================= */
             if (data.type === "auth") {
                 const token = data.token;
-                //console.log('ok:', data);
+                console.log('auth:', data);
 
                 if (!token) {
                     ws.send(JSON.stringify({ type: "auth_error", message: "Missing access token" }));
@@ -56,6 +56,7 @@ export const WS = (server, pool) => {
                     ws.close();
                     return;
                 }
+                console.log('payload:', payload);
 
                 const userId = payload.sub;
 
@@ -255,12 +256,12 @@ export const WS = (server, pool) => {
             }
         }
 
-        console.log(`\n🔌 Total sockets: ${wsInfo.size}`);
+        //console.log(`\n🔌 Total sockets: ${wsInfo.size}`);
         for (const [ws, uid] of wsInfo) {
             const s = ws._socket;
-            console.log(`  • Socket ${s.remoteAddress}:${s.remotePort} → User ${uid}`);
+            //console.log(`  • Socket ${s.remoteAddress}:${s.remotePort} → User ${uid}`);
         }
-        console.log("======================================\n");
+        //console.log("======================================\n");
     }
 
     // save DB
@@ -281,6 +282,7 @@ export const WS = (server, pool) => {
     async function sendRecentContacts(ws) {
         if (!ws.isAuth || !ws.user) return;
         const userId = ws.user.id;
+        console.log('user connect:', ws.user)
 
         try {
             const result = await pool.query(`
@@ -307,6 +309,8 @@ export const WS = (server, pool) => {
                 u.name ASC                            
             LIMIT 50;                                 
         `, [userId]);
+
+            console.log('list user:', result.rows)
 
             const contacts = result.rows.map(r => ({
                 id: r.id,
