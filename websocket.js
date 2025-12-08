@@ -52,6 +52,7 @@ export const WS = (server, pool) => {
                 try {
                     payload = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
                 } catch (err) {
+                    console.log('het han --------->>>>>')
                     ws.send(JSON.stringify({ type: "auth_error", message: "Invalid or expired token" }));
                     ws.close();
                     return;
@@ -142,6 +143,38 @@ export const WS = (server, pool) => {
 
             }
 
+            if (data.type === "reaction") {
+                const { messageId, reaction } = data;
+                console.log('reaction-> messageId, reaction:', messageId, reaction);
+
+                // ✅ append emoji vào json array
+                const result = await pool.query(`
+                    UPDATE messages
+                    SET reactions = reactions || jsonb_build_array($2::text)
+                    WHERE id = $1
+                    RETURNING id, sender_id, receiver_id, reactions
+                `, [messageId, reaction]);
+
+                if (result.rowCount === 0) {
+                    console.warn('Message not found for reaction', messageId);
+                    return;
+                }
+
+                const msg = result.rows[0];
+
+                const payload = {
+                    type: "reaction_update",
+                    messageId,
+                    reactions: msg.reactions   // <-- array đầy đủ
+                };
+
+                sendToUser(msg.sender_id, payload);
+                sendToUser(msg.receiver_id, payload);
+
+                return;
+            }
+
+
             // ====================
             // LOAD HISTORY
             // ====================
@@ -150,7 +183,7 @@ export const WS = (server, pool) => {
                 const userId = ws.user.id;
 
                 const result = await pool.query(`
-            SELECT id, sender_id, receiver_id, content, created_at
+            SELECT id, sender_id, receiver_id, content, created_at, reactions, type
             FROM messages
             WHERE
                 (sender_id = $1 AND receiver_id = $2)
@@ -165,7 +198,8 @@ export const WS = (server, pool) => {
                     to: r.receiver_id,
                     message: r.content,
                     created_at: r.created_at,
-                    type: 'text'
+                    reactions: r.reactions,
+                    type: r.type
                 }));
 
                 console.log('myId->partnerId:', userId, partnerId, result?.rows?.length);
