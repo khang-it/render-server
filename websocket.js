@@ -190,8 +190,10 @@ export const WS = (server, pool) => {
             // LOAD HISTORY
             // ====================
             if (data.type === "load_messages") {
-                const { conversationId, before } = data;
-
+                const { conversationId, firstMsg } = data;
+                const beforeCreatedAt = firstMsg?.created_at ?? null;
+                //const beforeId = firstMsg?.id;
+                console.log('firstMsg:', firstMsg)
                 const params = [conversationId];
                 let sql = `
                     SELECT id, sender_id, content, created_at, reactions, type
@@ -199,17 +201,21 @@ export const WS = (server, pool) => {
                     WHERE conversation_id = $1
                 `;
 
-                if (before) {
-                    sql += ` AND created_at < $2`;
-                    params.push(before);
+                if (beforeCreatedAt) {
+                    sql += ` AND created_at < $2 `;
+                    params.push(beforeCreatedAt);
                 }
 
                 sql += `
                     ORDER BY created_at DESC, id DESC
-                    LIMIT 50
+                    LIMIT 10
                 `;
 
+                //console.log('sql:', sql)
+
                 const result = await pool.query(sql, params);
+
+                //console.log('rows0:', result.rows)
 
                 const rows = result.rows
                     .reverse()
@@ -222,6 +228,8 @@ export const WS = (server, pool) => {
                         reactions: r.reactions,
                         type: r.type
                     }));
+
+                //console.log('rows:', rows)
 
                 ws.send(JSON.stringify({
                     type: "messages",
