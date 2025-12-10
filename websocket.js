@@ -186,40 +186,48 @@ export const WS = (server, pool) => {
                 return;
             }
 
-
             // ====================
             // LOAD HISTORY
             // ====================
             if (data.type === "load_messages") {
-                const conversationId = data.conversationId; //conversation_id
-                const userId = ws.user.id;
+                const { conversationId, before } = data;
 
-                const result = await pool.query(`
-            SELECT id, sender_id,  content, created_at, reactions, type
-            FROM messages
-            WHERE conversation_id = $1
-           ORDER BY created_at DESC, id DESC
-            LIMIT 50
-        `, [conversationId]);
+                const params = [conversationId];
+                let sql = `
+                    SELECT id, sender_id, content, created_at, reactions, type
+                    FROM messages
+                    WHERE conversation_id = $1
+                `;
 
-                const rows = result.rows.map(r => ({
-                    id: r.id,
-                    from: r.sender_id,
-                    // to: r.receiver_id,
-                    message: r.content,
-                    created_at: r.created_at,
-                    reactions: r.reactions,
-                    type: r.type
-                }));
-                //console.log('myId->partnerId:', userId, partnerId, result?.rows?.length);
+                if (before) {
+                    sql += ` AND created_at < $2`;
+                    params.push(before);
+                }
+
+                sql += `
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 50
+                `;
+
+                const result = await pool.query(sql, params);
+
+                const rows = result.rows
+                    .reverse()
+                    .map(r => ({
+                        id: r.id,
+                        from: r.sender_id,
+                        conversationId,
+                        message: r.content,
+                        created_at: r.created_at,
+                        reactions: r.reactions,
+                        type: r.type
+                    }));
 
                 ws.send(JSON.stringify({
                     type: "messages",
                     conversationId,
-                    rows: rows
+                    rows
                 }));
-
-                return;
             }
 
         });
