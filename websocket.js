@@ -116,16 +116,19 @@ export const WS = (server, pool) => {
                3) CHAT MESSAGE
             ================================================= */
             if (data.type === "chat") {
-                const { conversationId, from, message } = data;
+                const { conversationId, from, message, replyTo } = data;
                 const fromId = user.id || from;
                 //const receiverId = '';
 
                 // Save DB
-                const msgSaved = await saveMessage(fromId, conversationId, message);
+                const msgSaved = await saveMessage(fromId, conversationId, message, replyTo);
 
                 // Cập nhật danh sách recent contacts cho cả người gửi và người nhận
                 //sendRecentContactsToUser(user.id);
                 //sendRecentContactsToUser(receiverId);
+                const replyToJson = await findMessageReplyTo(
+                    msgSaved.reply_to_message_id
+                );
                 console.log('msgSaved:', msgSaved)
                 const content = {
                     type: "chat",
@@ -135,7 +138,8 @@ export const WS = (server, pool) => {
                         from: user.id,
                         conversationId: conversationId,
                         message: msgSaved.content,
-                        created_at: msgSaved.created_at
+                        created_at: msgSaved.created_at,
+                        reply_to: replyToJson
                     }
                 };
 
@@ -196,18 +200,26 @@ export const WS = (server, pool) => {
                 console.log('firstMsg:', firstMsg)
                 const params = [conversationId];
                 let sql = `
-                    SELECT id, sender_id, content, created_at, reactions, type
-                    FROM messages
-                    WHERE conversation_id = $1
+                    SELECT 
+                        m.id, m.sender_id, m.content, m.created_at, m.reactions, m.type,
+                        json_build_object(
+                            'id', r.id,
+                            'sender_id', r.sender_id,
+                            'content', left(r.content, 120),
+                            'type', r.type
+                        ) AS reply_to
+                    FROM messages m 
+                    LEFT JOIN messages r ON r.id = m.reply_to_message_id
+                    WHERE m.conversation_id = $1
                 `;
 
                 if (beforeCreatedAt) {
-                    sql += ` AND created_at < $2 `;
+                    sql += ` AND m.created_at < $2 `;
                     params.push(beforeCreatedAt);
                 }
 
                 sql += `
-                    ORDER BY created_at DESC, id DESC
+                    ORDER BY m.created_at DESC, m.id DESC
                     LIMIT 10
                 `;
 
@@ -226,7 +238,8 @@ export const WS = (server, pool) => {
                         message: r.content,
                         created_at: r.created_at,
                         reactions: r.reactions,
-                        type: r.type
+                        type: r.type,
+                        reply_to: r.reply_to
                     }));
 
                 //console.log('rows:', rows)
@@ -325,16 +338,35 @@ export const WS = (server, pool) => {
     }
 
     // save DB
-    async function saveMessage(senderId, conversationId, content) {
+    async function saveMessage(senderId, conversationId, content, reply_to_message_id) {
         const id = uuidv7();
         const sql = `
-        INSERT INTO messages (id, sender_id, conversation_id, content)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, sender_id, conversation_id, content, created_at
+        INSERT INTO messages (id, sender_id, conversation_id, content, reply_to_message_id)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, sender_id, conversation_id, content, created_at, reply_to_message_id
     `;
-        const result = await pool.query(sql, [id, senderId, conversationId, content]);
+        const result = await pool.query(sql, [id, senderId, conversationId, content, reply_to_message_id]);
 
         return result.rows[0];
+    }
+
+    async function findMessageReplyTo(replyToMessageId) {
+        if (!replyToMessageId) return null;
+
+        const sql = `
+    SELECT json_build_object(
+      'id', m.id,
+      'sender_id', m.sender_id,
+      'content', left(m.content, 120),
+      'type', m.type
+    ) AS reply_to
+    FROM messages m
+    WHERE m.id = $1
+  `;
+
+        const result = await pool.query(sql, [replyToMessageId]);
+
+        return result.rows[0]?.reply_to ?? null;
     }
 
     async function sendRecentContacts(ws) {
