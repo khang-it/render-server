@@ -116,12 +116,12 @@ export const WS = (server, pool) => {
                3) CHAT MESSAGE
             ================================================= */
             if (data.type === "chat") {
-                const { conversationId, from, message, replyTo } = data;
+                const { conversationId, from, message, msgType = 'text', replyTo } = data;
                 const fromId = user.id || from;
                 //const receiverId = '';
 
                 // Save DB
-                const msgSaved = await saveMessage(fromId, conversationId, message, replyTo);
+                const msgSaved = await saveMessage(fromId, conversationId, message, replyTo, msgType);
 
                 // Cập nhật danh sách recent contacts cho cả người gửi và người nhận
                 //sendRecentContactsToUser(user.id);
@@ -134,7 +134,7 @@ export const WS = (server, pool) => {
                     type: "chat",
                     payload: {
                         id: msgSaved.id,
-                        type: 'text',
+                        type: msgSaved.type,
                         from: user.id,
                         conversationId: conversationId,
                         message: msgSaved.content,
@@ -338,14 +338,14 @@ export const WS = (server, pool) => {
     }
 
     // save DB
-    async function saveMessage(senderId, conversationId, content, reply_to_message_id) {
+    async function saveMessage(senderId, conversationId, content, reply_to_message_id, msgType) {
         const id = uuidv7();
         const sql = `
-        INSERT INTO messages (id, sender_id, conversation_id, content, reply_to_message_id)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, sender_id, conversation_id, content, created_at, reply_to_message_id
+        INSERT INTO messages (id, sender_id, conversation_id, content, reply_to_message_id, type)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, sender_id, conversation_id, content, created_at, reply_to_message_id, type
     `;
-        const result = await pool.query(sql, [id, senderId, conversationId, content, reply_to_message_id]);
+        const result = await pool.query(sql, [id, senderId, conversationId, content, reply_to_message_id, msgType]);
 
         return result.rows[0];
     }

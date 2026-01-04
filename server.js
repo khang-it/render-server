@@ -18,6 +18,8 @@ import { requestLogger } from "./middleware/requestLogger.js";
 
 import { WS } from "./websocket.js";
 
+import uploadRoute from "./routes/upload.js";
+
 const app = express();
 app.set("trust proxy", 1);
 app.use(express.json());
@@ -49,6 +51,8 @@ app.use(
         credentials: true,
     })
 );
+
+
 
 // =====================================
 // ✅ GẮN MIDDLEWARE GHI LOG
@@ -441,6 +445,9 @@ app.get("/users", async (req, res) => {
     }
 });
 
+app.use("/api", uploadRoute);
+app.use("/uploads", express.static("uploads"));
+
 app.get("/", async (req, res) => {
     const result = await pool.query("SELECT NOW()");
     res.json({ now: result.rows[0] });
@@ -477,6 +484,7 @@ app.get("/messages", async (req, res) => {
         res.status(500).send("Error loading messages");
     }
 });
+
 
 // ================================
 // ✅ START SERVER + WebSocket
