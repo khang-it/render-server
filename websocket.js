@@ -123,9 +123,6 @@ export const WS = (server, pool) => {
                 // Save DB
                 const msgSaved = await saveMessage(fromId, conversationId, message, replyTo, msgType);
 
-                // Cập nhật danh sách recent contacts cho cả người gửi và người nhận
-                //sendRecentContactsToUser(user.id);
-                //sendRecentContactsToUser(receiverId);
                 const replyToJson = await findMessageReplyTo(
                     msgSaved.reply_to_message_id
                 );
@@ -142,12 +139,6 @@ export const WS = (server, pool) => {
                         reply_to: replyToJson
                     }
                 };
-
-                // Gửi tới receiver
-                //sendToUser(receiverId, content);
-
-                // Echo sender
-                //sendToUser(user.id, content);
 
                 sendToConversation(conversationId, content);
 
@@ -172,7 +163,7 @@ export const WS = (server, pool) => {
 
                 const msg = result.rows[0];
 
-                console.log('msg:', msg)
+                //console.log('msg:', msg)
                 const conversationId = msg.conversation_id;
 
                 const payload = {
@@ -197,11 +188,12 @@ export const WS = (server, pool) => {
                 const { conversationId, firstMsg } = data;
                 const beforeCreatedAt = firstMsg?.created_at ?? null;
                 //const beforeId = firstMsg?.id;
-                console.log('firstMsg:', firstMsg)
-                const params = [conversationId];
+                //console.log('firstMsg:', firstMsg)
+                const userId = ws.user.id;
+                const params = [conversationId, userId];
                 let sql = `
                     SELECT 
-                        m.id, m.sender_id, m.content, m.created_at, m.reactions, m.type,
+                        m.id, m.sender_id, m.content, m.created_at, m.reactions, m.type, m.status,
                         json_build_object(
                             'id', r.id,
                             'sender_id', r.sender_id,
@@ -210,11 +202,17 @@ export const WS = (server, pool) => {
                         ) AS reply_to
                     FROM messages m 
                     LEFT JOIN messages r ON r.id = m.reply_to_message_id
-                    WHERE m.conversation_id = $1
+                    WHERE m.conversation_id = $1 
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM message_deletions d
+                            WHERE d.message_id = m.id
+                                AND d.user_id = $2
+                        )
                 `;
 
                 if (beforeCreatedAt) {
-                    sql += ` AND m.created_at < $2 `;
+                    sql += ` AND m.created_at < $3 `;
                     params.push(beforeCreatedAt);
                 }
 
@@ -239,6 +237,7 @@ export const WS = (server, pool) => {
                         created_at: r.created_at,
                         reactions: r.reactions,
                         type: r.type,
+                        status: r.status,
                         reply_to: r.reply_to
                     }));
 
@@ -249,6 +248,57 @@ export const WS = (server, pool) => {
                     conversationId,
                     rows
                 }));
+            }
+
+            if (data.type === "recall") {
+                const { messageId } = data;
+                const userId = ws.user.id;
+
+                // ✅ Chỉ sender mới được thu hồi
+                const result = await pool.query(`
+                        UPDATE messages
+                        SET status = 1
+                        WHERE id = $1 AND sender_id = $2
+                        RETURNING conversation_id
+                    `, [messageId, userId]);
+
+                if (result.rowCount === 0) {
+                    ws.send(JSON.stringify({
+                        type: "error",
+                        message: "Không thể thu hồi tin nhắn"
+                    }));
+                    return;
+                }
+
+                const conversationId = result.rows[0].conversation_id;
+
+                // 🔔 Broadcast cho toàn bộ conversation
+                sendToConversation(conversationId, {
+                    type: "message_recalled",
+                    messageId
+                });
+
+                return;
+            }
+
+            if (data.type === "delete") {
+                const { messageId } = data;
+                const userId = ws.user.id;
+
+                // ⛔ Không cho xoá nếu message đã thu hồi
+                await pool.query(`
+                    INSERT INTO message_deletions (message_id, user_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT DO NOTHING
+                `, [messageId, userId]);
+
+                // 🔔 Chỉ gửi lại cho CHÍNH USER
+                ws.send(JSON.stringify({
+                    type: "message_deleted_self",
+                    messageId
+                }));
+
+                return;
             }
 
         });
@@ -477,7 +527,7 @@ export const WS = (server, pool) => {
 
     function sendToConversation(conversationId, payload) {
         const members = conversationMembers.get(conversationId);
-        console.log('members:', members)
+        //console.log('members:', members)
         if (!members) return;
 
         for (const userId of members) {
