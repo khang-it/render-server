@@ -61,6 +61,36 @@ const upload = multer({
 // ================================
 // ROUTE
 // ================================
+
+router.post(
+    "/upload/images",
+    upload.array("images", 20), // tối đa 20 ảnh
+    (req, res) => {
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ error: "No images uploaded" });
+        }
+
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+        const images = req.files.map(file => {
+            if (!file.mimetype.startsWith("image/")) return null;
+
+            return {
+                url: `${baseUrl}/${file.path}`,
+                type: "image",
+                name: file.originalname,
+                size: file.size,
+                mime: file.mimetype
+            };
+        }).filter(Boolean);
+
+        res.json({
+            count: images.length,
+            images
+        });
+    }
+);
+
 router.post(
     "/upload",
     upload.single("file"),
@@ -70,6 +100,8 @@ router.post(
         }
 
         const file = req.file;
+
+        //console.log('file:', file);
 
         let type = "file";
         if (file.mimetype.startsWith("image/")) type = "image";
@@ -86,5 +118,7 @@ router.post(
         });
     }
 );
+
+
 
 export default router;
