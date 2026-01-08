@@ -11,6 +11,10 @@ import fs from "fs";
 import http from "http";
 import https from "https";
 
+import { UPLOAD_ROOT_ABS, UPLOAD_ROOT } from "./config/upload.js";
+
+console.log('UPLOAD_ROOT_ABS:', UPLOAD_ROOT_ABS, UPLOAD_ROOT);
+
 import passport from "passport";
 import GoogleStrategy from "passport-google-oauth20";
 
@@ -52,6 +56,7 @@ app.use(
     })
 );
 
+app.use(`/${UPLOAD_ROOT}`, express.static(UPLOAD_ROOT_ABS));
 
 
 // =====================================
@@ -446,7 +451,6 @@ app.get("/users", async (req, res) => {
 });
 
 app.use("/api", uploadRoute);
-app.use("/uploads", express.static("uploads"));
 
 app.get("/", async (req, res) => {
     const result = await pool.query("SELECT NOW()");

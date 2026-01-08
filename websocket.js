@@ -142,6 +142,14 @@ export const WS = (server, pool) => {
 
                 sendToConversation(conversationId, content);
 
+                // 5️⃣ CẬP NHẬT RECENT CONTACTS
+                const members = conversationMembers.get(conversationId);
+                if (members) {
+                    for (const uid of members) {
+                        sendRecentContactsToUser(uid);
+                    }
+                }
+
             }
 
             /* ================================================
@@ -151,61 +159,65 @@ export const WS = (server, pool) => {
                 const {
                     fromConversationId,
                     targetConversationIds,
-                    messageIds,
-                    note
+                    // messageIds,
+                    note = '',
+                    messages,
                 } = data;
 
+                //console.log('messages:', messages)
+
                 const senderId = ws.user.id;
-
                 for (const toConversationId of targetConversationIds) {
+                    //const toConversationId = message?.id || '';
 
-                    // 1️⃣ GHI LOG
-                    await saveMessageShare(
-                        senderId,
-                        fromConversationId,
-                        toConversationId,
-                        messageIds,
-                        note
-                    );
+                    for (const msg of messages) {
+                        //console.log('msg:', msg);
 
-                    // 2️⃣ GHI MESSAGE ĐỂ HIỂN THỊ
-                    const msgSaved = await saveMessage(
-                        senderId,
-                        toConversationId,
-                        JSON.stringify({
+                        // 1️⃣ GHI LOG
+                        //messageIds
+                        await saveMessageShare(
+                            senderId,
                             fromConversationId,
-                            messageIds,
+                            toConversationId,
+                            msg.message,
                             note
-                        }),
-                        null,
-                        'share'
-                    );
+                        );
 
-                    // 3️⃣ WS PAYLOAD
-                    const payload = {
-                        type: 'chat',
-                        payload: {
-                            id: msgSaved.id,
-                            type: 'share',
-                            from: senderId,
-                            conversationId: toConversationId,
-                            message: msgSaved.content,
-                            created_at: msgSaved.created_at
-                        }
-                    };
+                        // 2️⃣ GHI MESSAGE ĐỂ HIỂN THỊ
+                        // JSON.stringify({type: 'share',fromConversationId, message: msg.message, note: note}),
+                        const msgSaved = await saveMessage(
+                            senderId,
+                            toConversationId,
+                            msg.message,
+                            null,
+                            msg.type
+                        );
 
-                    // 4️⃣ GỬI TIN
-                    sendToConversation(toConversationId, payload);
+                        // 3️⃣ WS PAYLOAD
+                        const payload = {
+                            type: 'chat',
+                            payload: {
+                                id: msgSaved.id,
+                                type: 'share',
+                                from: senderId,
+                                conversationId: toConversationId,
+                                message: msgSaved.content,
+                                created_at: msgSaved.created_at
+                            }
+                        };
 
-                    // 5️⃣ CẬP NHẬT RECENT CONTACTS
-                    const members = conversationMembers.get(toConversationId);
-                    if (members) {
-                        for (const uid of members) {
-                            sendRecentContactsToUser(uid);
+                        // 4️⃣ GỬI TIN
+                        sendToConversation(toConversationId, payload);
+
+                        // 5️⃣ CẬP NHẬT RECENT CONTACTS
+                        const members = conversationMembers.get(toConversationId);
+                        if (members) {
+                            for (const uid of members) {
+                                sendRecentContactsToUser(uid);
+                            }
                         }
                     }
                 }
-
                 return;
             }
 
@@ -244,6 +256,7 @@ export const WS = (server, pool) => {
                 // sendToUser(msg.receiver_id, payload);
 
                 sendToConversation(conversationId, payload)
+
 
                 return;
             }
@@ -345,6 +358,14 @@ export const WS = (server, pool) => {
                     messageId
                 });
 
+                // 5️⃣ CẬP NHẬT RECENT CONTACTS
+                const members = conversationMembers.get(conversationId);
+                if (members) {
+                    for (const uid of members) {
+                        sendRecentContactsToUser(uid);
+                    }
+                }
+
                 return;
             }
 
@@ -364,6 +385,8 @@ export const WS = (server, pool) => {
                     type: "message_deleted_self",
                     messageId
                 }));
+
+                sendRecentContactsToUser(userId);
 
                 return;
             }
@@ -471,12 +494,12 @@ export const WS = (server, pool) => {
         senderId,
         fromConversationId,
         toConversationId,
-        messageIds,
+        message,
         note
     ) {
         const sql = `
         INSERT INTO message_shares
-        (sender_id, from_conversation_id, to_conversation_id, message_ids, note)
+        (sender_id, from_conversation_id, to_conversation_id, message, note)
         VALUES ($1, $2, $3, $4, $5)
         RETURNING *
     `;
@@ -485,7 +508,7 @@ export const WS = (server, pool) => {
             senderId,
             fromConversationId,
             toConversationId,
-            messageIds,
+            message,
             note
         ]);
 

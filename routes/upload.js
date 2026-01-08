@@ -1,9 +1,11 @@
 import express from "express";
 import multer from "multer";
 import mime from "mime-types";
-import { v4 as uuid } from "uuid";
+import { v7 as uuid } from "uuid";
 import path from "path";
 import fs from "fs";
+
+import { UPLOAD_ROOT_ABS, UPLOAD_ROOT } from "../config/upload.js";
 
 const router = express.Router();
 
@@ -12,20 +14,27 @@ const router = express.Router();
 // ================================
 const storage = multer.diskStorage({
     destination(req, file, cb) {
-        const type = file.mimetype;
-
         let dir = "files";
-        if (type.startsWith("image/")) dir = "images";
-        else if (type.startsWith("video/")) dir = "videos";
+        if (file.mimetype.startsWith("image/")) dir = "images";
+        else if (file.mimetype.startsWith("video/")) dir = "videos";
 
-        const uploadPath = `uploads/${dir}`;
+        const uploadPath = path.join(UPLOAD_ROOT_ABS, dir);
         fs.mkdirSync(uploadPath, { recursive: true });
+
+        // 🔥 GẮN dir VÀO FILE ĐỂ DÙNG SAU
+        file._uploadDir = dir;
+
         cb(null, uploadPath);
     },
 
     filename(req, file, cb) {
         const ext = mime.extension(file.mimetype) || "bin";
-        cb(null, `${uuid()}.${ext}`);
+        const filename = `${uuid()}.${ext}`;
+
+        // 🔥 LƯU filename ĐỂ DÙNG LẠI
+        file._filename = filename;
+
+        cb(null, filename);
     }
 });
 
@@ -59,30 +68,23 @@ const upload = multer({
 });
 
 // ================================
-// ROUTE
+// ROUTE: UPLOAD IMAGES
 // ================================
-
 router.post(
     "/upload/images",
-    upload.array("images", 20), // tối đa 20 ảnh
+    upload.array("images", 20),
     (req, res) => {
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({ error: "No images uploaded" });
         }
 
-        const baseUrl = `${req.protocol}://${req.get("host")}`;
-
-        const images = req.files.map(file => {
-            if (!file.mimetype.startsWith("image/")) return null;
-
-            return {
-                url: `${baseUrl}/${file.path}`,
-                type: "image",
-                name: file.originalname,
-                size: file.size,
-                mime: file.mimetype
-            };
-        }).filter(Boolean);
+        const images = req.files.map(file => ({
+            url: `/${UPLOAD_ROOT}/${file._uploadDir}/${file._filename}`,
+            type: "image",
+            name: file.originalname,
+            size: file.size,
+            mime: file.mimetype
+        }));
 
         res.json({
             count: images.length,
@@ -91,6 +93,9 @@ router.post(
     }
 );
 
+// ================================
+// ROUTE: UPLOAD SINGLE FILE
+// ================================
 router.post(
     "/upload",
     upload.single("file"),
@@ -101,16 +106,13 @@ router.post(
 
         const file = req.file;
 
-        //console.log('file:', file);
-
         let type = "file";
         if (file.mimetype.startsWith("image/")) type = "image";
         else if (file.mimetype.startsWith("video/")) type = "video";
-
-        const url = `${req.protocol}://${req.get("host")}/${file.path}`;
+        else if (file.mimetype === "application/pdf") type = "pdf";
 
         res.json({
-            url,
+            url: `/${UPLOAD_ROOT}/${file._uploadDir}/${file._filename}`,
             type,
             name: file.originalname,
             size: file.size,
@@ -118,7 +120,5 @@ router.post(
         });
     }
 );
-
-
 
 export default router;
