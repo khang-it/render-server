@@ -144,6 +144,73 @@ export const WS = (server, pool) => {
 
             }
 
+            /* ================================================
+                4) SHARE MESSAGE
+            ================================================= */
+            if (data.type === "message_share") {
+                const {
+                    fromConversationId,
+                    targetConversationIds,
+                    messageIds,
+                    note
+                } = data;
+
+                const senderId = ws.user.id;
+
+                for (const toConversationId of targetConversationIds) {
+
+                    // 1️⃣ GHI LOG
+                    await saveMessageShare(
+                        senderId,
+                        fromConversationId,
+                        toConversationId,
+                        messageIds,
+                        note
+                    );
+
+                    // 2️⃣ GHI MESSAGE ĐỂ HIỂN THỊ
+                    const msgSaved = await saveMessage(
+                        senderId,
+                        toConversationId,
+                        JSON.stringify({
+                            fromConversationId,
+                            messageIds,
+                            note
+                        }),
+                        null,
+                        'share'
+                    );
+
+                    // 3️⃣ WS PAYLOAD
+                    const payload = {
+                        type: 'chat',
+                        payload: {
+                            id: msgSaved.id,
+                            type: 'share',
+                            from: senderId,
+                            conversationId: toConversationId,
+                            message: msgSaved.content,
+                            created_at: msgSaved.created_at
+                        }
+                    };
+
+                    // 4️⃣ GỬI TIN
+                    sendToConversation(toConversationId, payload);
+
+                    // 5️⃣ CẬP NHẬT RECENT CONTACTS
+                    const members = conversationMembers.get(toConversationId);
+                    if (members) {
+                        for (const uid of members) {
+                            sendRecentContactsToUser(uid);
+                        }
+                    }
+                }
+
+                return;
+            }
+
+
+
             if (data.type === "reaction") {
                 const { messageId, reaction } = data;
                 console.log('reaction-> messageId, reaction:', messageId, reaction);
@@ -399,6 +466,51 @@ export const WS = (server, pool) => {
 
         return result.rows[0];
     }
+
+    async function saveMessageShare(
+        senderId,
+        fromConversationId,
+        toConversationId,
+        messageIds,
+        note
+    ) {
+        const sql = `
+        INSERT INTO message_shares
+        (sender_id, from_conversation_id, to_conversation_id, message_ids, note)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+    `;
+
+        const result = await pool.query(sql, [
+            senderId,
+            fromConversationId,
+            toConversationId,
+            messageIds,
+            note
+        ]);
+
+        return result.rows[0];
+    }
+
+    async function getMessagesByIds(ids = []) {
+        if (!ids.length) return [];
+
+        const sql = `
+        SELECT 
+            id,
+            sender_id AS from,
+            content AS message,
+            type,
+            created_at
+        FROM messages
+        WHERE id = ANY($1::uuid[])
+        ORDER BY created_at ASC
+    `;
+
+        const result = await pool.query(sql, [ids]);
+        return result.rows;
+    }
+
 
     async function findMessageReplyTo(replyToMessageId) {
         if (!replyToMessageId) return null;
