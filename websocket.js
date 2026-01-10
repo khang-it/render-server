@@ -391,6 +391,55 @@ export const WS = (server, pool) => {
                 return;
             }
 
+            // ================= CALL JOIN =================
+            if (data.type === "join_call") {
+                const { conversationId } = data;
+                const userId = ws.user.id;
+
+                if (!conversationMembers.has(conversationId)) return;
+
+                ws.callRoom = conversationId;
+
+                // thông báo cho người khác trong conversation
+                const members = conversationMembers.get(conversationId);
+                for (const uid of members) {
+                    if (uid !== userId) {
+                        sendToUser(uid, {
+                            type: "call_peer_joined",
+                            conversationId,
+                            from: userId
+                        });
+                    }
+                }
+
+                return;
+            }
+
+
+            // ================= CALL SIGNAL =================
+            if (data.type === "call_signal") {
+                const { conversationId, data: signal } = data;
+                const userId = ws.user.id;
+
+                const members = conversationMembers.get(conversationId);
+                if (!members) return;
+
+                for (const uid of members) {
+                    if (uid !== userId) {
+                        sendToUser(uid, {
+                            type: "call_signal",
+                            conversationId,
+                            from: userId,
+                            data: signal
+                        });
+                    }
+                }
+
+                return;
+            }
+
+            // ================= // CALL JOIN =================
+
         });
 
         /* ======================================================
