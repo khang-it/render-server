@@ -42,7 +42,7 @@ export const WS = (server, pool) => {
             ================================================= */
             if (data.type === "auth") {
                 const token = data.token;
-                console.log('auth:', data);
+                //console.log('auth:', data);
 
                 if (!token) {
                     ws.send(JSON.stringify({ type: "auth_error", message: "Missing access token" }));
@@ -396,13 +396,20 @@ export const WS = (server, pool) => {
                 const { conversationId } = data;
                 const userId = ws.user.id;
 
+                //console.log('join_call conversationId:', conversationId, conversationMembers.has(conversationId))
+                //console.log('join_call conversationMembers:', conversationMembers)
+
                 if (!conversationMembers.has(conversationId)) return;
 
                 ws.callRoom = conversationId;
 
                 // thông báo cho người khác trong conversation
                 const members = conversationMembers.get(conversationId);
+
+                //console.log('userId:', userId)
+                //console.log('members:', members)
                 for (const uid of members) {
+                    console.log('send call -> uid, userId:', uid, userId)
                     if (uid !== userId) {
                         sendToUser(uid, {
                             type: "call_peer_joined",
@@ -415,11 +422,13 @@ export const WS = (server, pool) => {
                 return;
             }
 
-
             // ================= CALL SIGNAL =================
             if (data.type === "call_signal") {
                 const { conversationId, data: signal } = data;
                 const userId = ws.user.id;
+
+                console.log('call_signal conversationId:', conversationId)
+                console.log('call_signal signal:', signal)
 
                 const members = conversationMembers.get(conversationId);
                 if (!members) return;
@@ -674,7 +683,7 @@ export const WS = (server, pool) => {
                 };
             });
 
-            console.log('conversations:', conversations.length)
+            //console.log('conversations:', conversations.length)
 
             ws.send(JSON.stringify({
                 type: 'recent_contacts', // giữ tên cũ cho FE
