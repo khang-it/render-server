@@ -447,6 +447,68 @@ export const WS = (server, pool) => {
                 return;
             }
 
+            // ================= CALL INVITE =================
+            if (data.type === "call_invite") {
+                const { conversationId } = data;
+                const userId = ws.user.id;
+
+                const members = conversationMembers.get(conversationId);
+                if (!members) return;
+
+                for (const uid of members) {
+                    if (uid !== userId) {
+                        sendToUser(uid, {
+                            type: "call_invite",
+                            conversationId,
+                            from: userId,
+                            fromName: ws.user.name
+                        });
+                    }
+                }
+                return;
+            }
+
+
+            // ================= CALL ACCEPT =================
+            if (data.type === "call_accept") {
+                const { conversationId } = data;
+                const userId = ws.user.id;
+
+                const members = conversationMembers.get(conversationId);
+                if (!members) return;
+
+                for (const uid of members) {
+                    if (uid !== userId) {
+                        sendToUser(uid, {
+                            type: "call_accept",
+                            conversationId,
+                            from: userId
+                        });
+                    }
+                }
+                return;
+            }
+
+            // ================= CALL END =================
+            if (data.type === "call_end") {
+                const { conversationId } = data;
+                const userId = ws.user.id;
+
+                const members = conversationMembers.get(conversationId);
+                if (!members) return;
+
+                for (const uid of members) {
+                    if (uid !== userId) {
+                        sendToUser(uid, {
+                            type: "call_end",
+                            conversationId,
+                            from: userId
+                        });
+                    }
+                }
+                return;
+            }
+
             // ================= // CALL JOIN =================
 
         });
