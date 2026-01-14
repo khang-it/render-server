@@ -1,12 +1,14 @@
 // server-websocket.js
 import { WebSocketServer } from "ws";
 import jwt from "jsonwebtoken";
-import { v7 as uuidv7 } from "uuid";
+import { v7 as uuid } from "uuid";
 
 export const WS = (server, pool) => {
     const wss = new WebSocketServer({ server });
 
     const conversationMembers = new Map();
+
+    const callSessions = new Map();
 
     // userId => { user, sockets: Set<WebSocket> }
     const userSockets = new Map();
@@ -450,29 +452,74 @@ export const WS = (server, pool) => {
             // ================= CALL INVITE =================
             if (data.type === "call_invite") {
                 const { conversationId } = data;
-                const userId = ws.user.id;
+                const callerId = ws.user.id;
 
                 const members = conversationMembers.get(conversationId);
                 if (!members) return;
 
+                // nếu đã có call session → bỏ qua
+                if (callSessions.has(conversationId)) return;
+
+                const timeout = setTimeout(async () => {
+                    callSessions.delete(conversationId);
+
+                    const callData = {
+                        callType: "video",
+                        status: "missed",
+                        duration: 0
+                    };
+
+                    const msg = await saveCallMessage(conversationId, callerId, null, callData);
+
+                    // ✅ push realtime message
+                    sendToConversation(conversationId, {
+                        type: "chat",
+                        payload: {
+                            id: msg.id,
+                            from: callerId,
+                            conversationId,
+                            message: JSON.stringify(callData),
+                            created_at: msg.created_at,
+                            type: "call"
+                        }
+                    });
+
+                }, 10000);  //30s
+
+
+                callSessions.set(conversationId, {
+                    callerId,
+                    startTime: null,
+                    timeout
+                });
+
+                // gửi ringing cho người kia
                 for (const uid of members) {
-                    if (uid !== userId) {
+                    if (uid !== callerId) {
                         sendToUser(uid, {
                             type: "call_invite",
                             conversationId,
-                            from: userId,
+                            from: callerId,
                             fromName: ws.user.name
                         });
                     }
                 }
+
                 return;
             }
+
 
 
             // ================= CALL ACCEPT =================
             if (data.type === "call_accept") {
                 const { conversationId } = data;
                 const userId = ws.user.id;
+
+                const session = callSessions.get(conversationId);
+                if (!session) return;
+
+                clearTimeout(session.timeout);
+                session.startTime = Date.now();
 
                 const members = conversationMembers.get(conversationId);
                 if (!members) return;
@@ -486,17 +533,52 @@ export const WS = (server, pool) => {
                         });
                     }
                 }
+
                 return;
             }
+
 
             // ================= CALL END =================
             if (data.type === "call_end") {
                 const { conversationId } = data;
                 const userId = ws.user.id;
 
+                const session = callSessions.get(conversationId);
+                if (!session) return;
+
                 const members = conversationMembers.get(conversationId);
                 if (!members) return;
 
+                let duration = 0;
+                if (session.startTime) {
+                    duration = Math.floor((Date.now() - session.startTime) / 1000);
+                }
+
+                const callData = {
+                    callType: "video",
+                    status: duration > 0 ? "ended" : "missed",
+                    duration
+                };
+
+                // ✅ ghi DB
+                const msg = await saveCallMessage(conversationId, session.callerId, userId, callData);
+                console.log('saveCallMessage:', msg)
+                callSessions.delete(conversationId);
+
+                // ✅ broadcast message realtime
+                sendToConversation(conversationId, {
+                    type: "chat",
+                    payload: {
+                        id: msg.id,
+                        from: session.callerId,
+                        conversationId,
+                        message: JSON.stringify(callData),
+                        created_at: msg.created_at,
+                        type: "call"
+                    }
+                });
+
+                // thông báo end call cho UI call
                 for (const uid of members) {
                     if (uid !== userId) {
                         sendToUser(uid, {
@@ -506,8 +588,11 @@ export const WS = (server, pool) => {
                         });
                     }
                 }
+
                 return;
             }
+
+
 
             // ================= // CALL JOIN =================
 
@@ -598,7 +683,7 @@ export const WS = (server, pool) => {
 
     // save DB
     async function saveMessage(senderId, conversationId, content, reply_to_message_id, msgType) {
-        const id = uuidv7();
+        const id = uuid();
         const sql = `
         INSERT INTO messages (id, sender_id, conversation_id, content, reply_to_message_id, type)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -789,6 +874,18 @@ export const WS = (server, pool) => {
         }
     }
 
+    async function saveCallMessage(conversationId, fromId, toId, callData) {
+        const id = uuid();
+        const content = JSON.stringify(callData);
+
+        const result = await pool.query(`
+        INSERT INTO messages (id, sender_id, conversation_id, content, type)
+        VALUES ($1, $2, $3, $4, 'call')
+        RETURNING *
+    `, [id, fromId, conversationId, content]);
+
+        return result.rows[0];
+    }
 
     return { wss, userSockets, sendToUser };
 
