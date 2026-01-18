@@ -532,7 +532,8 @@ export const WS = (server, pool) => {
                         sendToUser(uid, {
                             type: "call_accept",
                             conversationId,
-                            from: userId
+                            from: userId,
+                            callType: session?.callType || 'video'  // video | audio
                         });
                     }
                 }
