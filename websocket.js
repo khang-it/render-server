@@ -397,6 +397,7 @@ export const WS = (server, pool) => {
             if (data.type === "join_call") {
                 const { conversationId } = data;
                 const userId = ws.user.id;
+                console.log('join_call:', userId)
 
                 //console.log('join_call conversationId:', conversationId, conversationMembers.has(conversationId))
                 //console.log('join_call conversationMembers:', conversationMembers)
@@ -451,8 +452,9 @@ export const WS = (server, pool) => {
 
             // ================= CALL INVITE =================
             if (data.type === "call_invite") {
-                const { conversationId } = data;
+                const { conversationId, callType = "video" } = data;
                 const callerId = ws.user.id;
+                console.log('call_invite:', callerId)
 
                 const members = conversationMembers.get(conversationId);
                 if (!members) return;
@@ -464,7 +466,7 @@ export const WS = (server, pool) => {
                     callSessions.delete(conversationId);
 
                     const callData = {
-                        callType: "video",
+                        callType: callType,
                         status: "missed",
                         duration: 0
                     };
@@ -489,6 +491,7 @@ export const WS = (server, pool) => {
 
                 callSessions.set(conversationId, {
                     callerId,
+                    callType,
                     startTime: null,
                     timeout
                 });
@@ -500,6 +503,7 @@ export const WS = (server, pool) => {
                             type: "call_invite",
                             conversationId,
                             from: callerId,
+                            callType,
                             fromName: ws.user.name
                         });
                     }
@@ -508,12 +512,11 @@ export const WS = (server, pool) => {
                 return;
             }
 
-
-
             // ================= CALL ACCEPT =================
             if (data.type === "call_accept") {
                 const { conversationId } = data;
                 const userId = ws.user.id;
+                console.log('call_accept:', userId)
 
                 const session = callSessions.get(conversationId);
                 if (!session) return;
@@ -540,8 +543,10 @@ export const WS = (server, pool) => {
 
             // ================= CALL END =================
             if (data.type === "call_end") {
-                const { conversationId } = data;
+                const { conversationId, message } = data;
                 const userId = ws.user.id;
+
+                console.log('call_end:', userId)
 
                 const session = callSessions.get(conversationId);
                 if (!session) return;
@@ -557,7 +562,9 @@ export const WS = (server, pool) => {
                 const callData = {
                     callType: "video",
                     status: duration > 0 ? "ended" : "missed",
-                    duration
+                    duration,
+                    message: message?.reason,
+                    callType: session.callType,   // 👈 video | audio
                 };
 
                 // ✅ ghi DB
@@ -579,12 +586,14 @@ export const WS = (server, pool) => {
                 });
 
                 // thông báo end call cho UI call
+                //console.log('members:', members)
                 for (const uid of members) {
                     if (uid !== userId) {
                         sendToUser(uid, {
                             type: "call_end",
                             conversationId,
-                            from: userId
+                            from: userId,
+                            callType: session.callType,   // 👈 video | audio
                         });
                     }
                 }
