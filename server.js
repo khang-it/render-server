@@ -440,7 +440,7 @@ app.get("/echo", async (req, res) => {
 
 app.get("/users", async (req, res) => {
     try {
-        const result = await pool.query("SELECT name, email FROM account");
+        const result = await pool.query("SELECT name, email FROM users order by name");
         console.log('users:', result.rows.length, new Date().getTime())
         res.json({
             success: true,
@@ -493,8 +493,6 @@ app.get("/messages", async (req, res) => {
 
 // sticker
 app.use("/api", authBearer, stickerRoutes);
-
-
 
 // ================================
 // ✅ START SERVER + WebSocket
