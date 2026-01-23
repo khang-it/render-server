@@ -516,7 +516,7 @@ app.get("/api/sticker-packs/:id/stickers", authBearer, async (req, res) => {
     const packId = req.params.id;
 
     const stickers = await pool.query(`
-    SELECT id, name, file_path, width, height, size
+    SELECT id, name, url, width, height, size
     FROM stickers
     WHERE pack_id = $1
     ORDER BY id
