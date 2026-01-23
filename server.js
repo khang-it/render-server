@@ -544,7 +544,7 @@ app.get("/api/my-sticker-packs", authBearer, async (req, res) => {
     const userId = req.user.sub;
 
     const packs = await pool.query(`
-    SELECT sp.id, sp.name, sp.icon, usp.sort_order
+    SELECT sp.id, sp.name, sp.icon, usp.sort_order, sp.description
     FROM sticker_packs sp
     JOIN user_sticker_packs usp ON usp.pack_id = sp.id
     WHERE usp.user_id = $1
