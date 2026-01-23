@@ -23,6 +23,7 @@ import { requestLogger } from "./middleware/requestLogger.js";
 import { WS } from "./websocket.js";
 
 import uploadRoute from "./routes/upload.js";
+import stickerRoutes from "./routes/sticker.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -63,6 +64,24 @@ app.use(`/${UPLOAD_ROOT}`, express.static(UPLOAD_ROOT_ABS));
 // ✅ GẮN MIDDLEWARE GHI LOG
 // =====================================
 //app.use(requestLogger);
+
+// ================================
+// ✅ Middleware
+// ================================
+function authBearer(req, res, next) {
+    const h = req.headers.authorization || "";
+    const [, token] = h.split(" ");
+
+    if (!token) return res.status(401).json({ error: "Missing token" });
+
+    try {
+        const payload = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        req.user = payload;
+        next();
+    } catch {
+        return res.status(401).json({ error: "Invalid token" });
+    }
+}
 
 // ================================
 // ✅ JWT helpers
@@ -195,23 +214,6 @@ function issueTokensAndRespond(res, user, options = { includeAccessInBody: true 
     return { accessToken, refreshToken };
 }
 
-// ================================
-// ✅ Middleware
-// ================================
-function authBearer(req, res, next) {
-    const h = req.headers.authorization || "";
-    const [, token] = h.split(" ");
-
-    if (!token) return res.status(401).json({ error: "Missing token" });
-
-    try {
-        const payload = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-        req.user = payload;
-        next();
-    } catch {
-        return res.status(401).json({ error: "Invalid token" });
-    }
-}
 
 // ================================
 // ✅ AUTH ROUTES
@@ -490,113 +492,8 @@ app.get("/messages", async (req, res) => {
 });
 
 // sticker
-// GET /api/sticker-packs
-app.get("/api/sticker-packs", authBearer, async (req, res) => {
-    const userId = req.user.sub;
+app.use("/api", authBearer, stickerRoutes);
 
-    const packs = await pool.query(`
-    SELECT 
-      sp.id,
-      sp.name,
-      sp.icon,
-      sp.description,
-      EXISTS (
-        SELECT 1 FROM user_sticker_packs usp
-        WHERE usp.pack_id = sp.id AND usp.user_id = $1
-      ) AS downloaded
-    FROM sticker_packs sp
-    ORDER BY sp.created_at
-  `, [userId]);
-
-    res.json(packs.rows);
-});
-
-// GET /api/sticker-packs/:id/stickers
-app.get("/api/sticker-packs/:id/stickers", authBearer, async (req, res) => {
-    const packId = req.params.id;
-
-    const stickers = await pool.query(`
-    SELECT id, name, url, width, height, size
-    FROM stickers
-    WHERE pack_id = $1
-    ORDER BY id
-  `, [packId]);
-
-    res.json(stickers.rows);
-});
-
-// POST /api/sticker-packs/:id/download
-app.post("/api/sticker-packs/:id/download", authBearer, async (req, res) => {
-    const userId = req.user.sub;
-    const packId = req.params.id;
-
-    await pool.query(`
-    INSERT INTO user_sticker_packs(user_id, pack_id)
-    VALUES ($1,$2)
-    ON CONFLICT DO NOTHING
-  `, [userId, packId]);
-
-    res.json({ success: true });
-});
-
-// GET /api/my-sticker-packs
-app.get("/api/my-sticker-packs", authBearer, async (req, res) => {
-    const userId = req.user.sub;
-
-    const packs = await pool.query(`
-    SELECT sp.id, sp.name, sp.icon, usp.sort_order, sp.description
-    FROM sticker_packs sp
-    JOIN user_sticker_packs usp ON usp.pack_id = sp.id
-    WHERE usp.user_id = $1
-    ORDER BY usp.sort_order ASC
-  `, [userId]);
-
-    res.json(packs.rows);
-});
-
-// POST /api/my-sticker-packs/sort
-app.post("/api/my-sticker-packs/sort", authBearer, async (req, res) => {
-    const userId = req.user.sub;
-    const { orders } = req.body; // [{ pack_id, sort_order }]
-
-    console.log('sort orders:', orders);
-
-    const client = await pool.connect();
-    try {
-        await client.query("BEGIN");
-
-        for (const o of orders) {
-            await client.query(
-                `UPDATE user_sticker_packs
-         SET sort_order = $1
-         WHERE user_id = $2 AND pack_id = $3`,
-                [o.sort_order, userId, o.pack_id]
-            );
-        }
-
-        await client.query("COMMIT");
-        res.json({ success: true });
-    } catch (err) {
-        await client.query("ROLLBACK");
-        throw err;
-    } finally {
-        client.release();
-    }
-});
-
-// DELETE /api/my-sticker-packs/:packId
-app.delete("/api/my-sticker-packs/:packId", authBearer, async (req, res) => {
-    const userId = req.user.sub;
-    const packId = req.params.packId;
-
-    await pool.query(
-        `DELETE FROM user_sticker_packs
-     WHERE user_id = $1 AND pack_id = $2`,
-        [userId, packId]
-    );
-
-    res.json({ success: true });
-});
 
 
 // ================================
