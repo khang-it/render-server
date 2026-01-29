@@ -454,6 +454,9 @@ app.get("/users", async (req, res) => {
 
 app.use("/api", uploadRoute);
 
+import sharingRoutes from "./routes/sharing.js";
+app.use("/api", sharingRoutes);
+
 app.get("/", async (req, res) => {
     const result = await pool.query("SELECT NOW()");
     res.json({ now: result.rows[0] });
