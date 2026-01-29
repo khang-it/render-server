@@ -10,6 +10,9 @@ MSG ?= update_$(TIMESTAMP)
 start: 
 	yarn start
 
+dev: 
+	yarn dev
+
 all:
 	@echo "Available commands:"
 	@echo "  make deploy MSG='your message'"

@@ -1,6 +1,4 @@
-// import dotenv from "dotenv";
-// dotenv.config();
-import pool from "./db.js";
+import pool from "#db";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -11,19 +9,19 @@ import fs from "fs";
 import http from "http";
 import https from "https";
 
-import { UPLOAD_ROOT_ABS, UPLOAD_ROOT } from "./config/upload.js";
+import { UPLOAD_ROOT_ABS, UPLOAD_ROOT } from "#config/upload.js"
 
 console.log('UPLOAD_ROOT_ABS:', UPLOAD_ROOT_ABS, UPLOAD_ROOT);
 
 import passport from "passport";
 import GoogleStrategy from "passport-google-oauth20";
 
-import { requestLogger } from "./middleware/requestLogger.js";
+import { requestLogger } from "#middlewares/requestLogger.js";
 
-import { WS } from "./websocket.js";
+import { WS } from "#src/websocket.js";
 
-import uploadRoute from "./routes/upload.js";
-import stickerRoutes from "./routes/sticker.js";
+import uploadRoute from "#routes/upload.js";
+import stickerRoutes from "#routes/sticker.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -454,7 +452,7 @@ app.get("/users", async (req, res) => {
 
 app.use("/api", uploadRoute);
 
-import sharingRoutes from "./routes/sharing.js";
+import sharingRoutes from "#routes/sharing.js";
 app.use("/api", sharingRoutes);
 
 app.get("/", async (req, res) => {

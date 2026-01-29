@@ -4,7 +4,8 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "nodemon -r ems server.js"
+    "start": "nodemon -r ems src/server.js",
+    "dev": "nodemon src/server.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.0",
@@ -24,5 +25,16 @@
     "socket.io": "^4.8.3",
     "uuid": "^13.0.0",
     "ws": "^8.18.3"
+  },
+  "imports": {
+    "#src/*": "./src/*",
+    "#db": "./src/db.js",
+    "#config/*": "./src/config/*",
+    "#utils": "./src/utils/index.js",
+    "#utils/*": "./src/utils/*",
+    "#services/*": "./src/services/*",
+    "#controllers/*": "./src/controllers/*",
+    "#middlewares/*": "./src/middlewares/*",
+    "#routes/*": "./src/routes/*"
   }
 }
