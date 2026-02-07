@@ -3,6 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { UPLOAD_ROOT, UPLOAD_ROOT_ABS } from "#config/upload.js";
 import corsOptions from "#config/cors.js";
+import authBearer from "#middlewares/authBearer.js";
 
 import authRoutes from "#routes/auth.route.js";
 import userRoutes from "#routes/users.js";
@@ -27,7 +28,7 @@ app.use("/auth", authRoutes);
 app.use("/api/users", userRoutes);
 //app.use("/api/endo", endoRoutes);
 app.use("/api", uploadRoutes);
-app.use("/api", stickerRoutes);
+app.use("/api/stickers", authBearer, stickerRoutes);
 app.use("/api", sharingRoutes);
 
 

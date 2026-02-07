@@ -493,7 +493,7 @@ app.get("/messages", async (req, res) => {
 });
 
 // sticker
-app.use("/api", authBearer, stickerRoutes);
+app.use("/api/stickers", authBearer, stickerRoutes);
 
 // ================================
 // ✅ START SERVER + WebSocket

@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken";
 
 export default function authBearer(req, res, next) {
     const [, token] = (req.headers.authorization || "").split(" ");
-
+    console.log('authBearer token:', token)
     if (!token) return res.status(401).json({ error: "Missing token" });
 
     try {
