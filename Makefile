@@ -13,6 +13,9 @@ start:
 dev: 
 	yarn dev
 
+main: 
+	yarn main
+
 all:
 	@echo "Available commands:"
 	@echo "  make deploy MSG='your message'"

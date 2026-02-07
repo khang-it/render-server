@@ -1,4 +1,4 @@
-// server-websocket.js
+// websocket.js
 import { WebSocketServer } from "ws";
 import jwt from "jsonwebtoken";
 import { v7 as uuid } from "uuid";

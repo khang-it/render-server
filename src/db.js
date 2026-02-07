@@ -19,10 +19,10 @@ if (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes("localhost"))
             rejectUnauthorized: true,
             ca: [fs.readFileSync("./certs/ca.pem").toString()]
         },
-        max: 10,                // tối đa 10 connection
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 5000,
-        keepAlive: true
+        // max: 10,                // tối đa 10 connection
+        // idleTimeoutMillis: 30000,
+        // connectionTimeoutMillis: 5000,
+        // keepAlive: true
     };
 }
 
