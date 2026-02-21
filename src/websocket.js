@@ -645,6 +645,7 @@ export const WS = (server, pool) => {
         FROM messages m
         JOIN users u ON u.id = m.sender_id
         WHERE m.conversation_id = $1
+        AND m.type IN ('text') 
         AND NOT EXISTS (
             SELECT 1 FROM message_deletions d
             WHERE d.message_id = m.id
