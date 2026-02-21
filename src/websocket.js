@@ -601,10 +601,116 @@ export const WS = (server, pool) => {
 
                 return;
             }
-
-
-
             // ================= // CALL JOIN =================
+
+            // SEARCH MESSSAGES 
+
+            // ====================
+            // 🔍 SEARCH MESSAGES (WS - PRODUCTION)
+            // ====================
+            if (data.type === "search_messages") {
+                const {
+                    conversationId,
+                    keyword = "",
+                    senderFilter = "all",
+                    dateFilter = null,
+                    limit = 30,
+                    before = null
+                } = data;
+
+                const userId = ws.user.id;
+
+                // 🔐 Bảo mật: chỉ search conversation user tham gia
+                if (!conversationMembers.has(conversationId) ||
+                    !conversationMembers.get(conversationId).has(userId)) {
+                    ws.send(JSON.stringify({
+                        type: "search_results",
+                        conversationId,
+                        rows: []
+                    }));
+                    return;
+                }
+
+                const params = [conversationId, userId];
+                let idx = 3;
+
+                let sql = `
+        SELECT 
+            m.id,
+            m.sender_id,
+            m.content,
+            m.created_at,
+            m.type,
+            u.name AS sender_name
+        FROM messages m
+        JOIN users u ON u.id = m.sender_id
+        WHERE m.conversation_id = $1
+        AND NOT EXISTS (
+            SELECT 1 FROM message_deletions d
+            WHERE d.message_id = m.id
+            AND d.user_id = $2
+        )
+        AND m.status IS DISTINCT FROM 1
+    `;
+
+                // ===== KEYWORD (ILIKE + nhanh) =====
+                if (keyword) {
+                    sql += ` AND m.content ILIKE $${idx++}`;
+                    params.push(`%${keyword}%`);
+                }
+
+                // ===== SENDER FILTER =====
+                if (senderFilter === "me") {
+                    sql += ` AND m.sender_id = $${idx++}`;
+                    params.push(userId);
+                }
+                if (senderFilter === "other") {
+                    sql += ` AND m.sender_id != $${idx++}`;
+                    params.push(userId);
+                }
+
+                // ===== DATE FILTER =====
+                if (dateFilter) {
+                    sql += ` AND DATE(m.created_at) = $${idx++}`;
+                    params.push(dateFilter);
+                }
+
+                // ===== CURSOR PAGINATION =====
+                if (before) {
+                    sql += ` AND m.created_at < $${idx++}`;
+                    params.push(before);
+                }
+
+                sql += `
+        ORDER BY m.created_at DESC
+        LIMIT $${idx++}
+    `;
+                params.push(limit);
+
+                console.log('sql:', sql);
+                console.log('params:', params)
+
+                const result = await pool.query(sql, params);
+
+                const rows = result.rows.map(r => ({
+                    id: r.id,
+                    from: r.sender_id,
+                    fromName: r.sender_name,
+                    conversationId,
+                    message: r.content,
+                    created_at: r.created_at,
+                    type: r.type
+                }));
+
+                ws.send(JSON.stringify({
+                    type: "search_results",
+                    conversationId,
+                    rows,
+                    cursor: rows.at(-1)?.created_at || null
+                }));
+
+                return;
+            }
 
         });
 
